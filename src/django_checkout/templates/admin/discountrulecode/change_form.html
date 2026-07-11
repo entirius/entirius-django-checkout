@@ -1,0 +1,12 @@
+{% extends "admin/change_form.html" %}
+{% block object-tools %}
+    <div class="object-tools" style="display: flex; align-items: center;">
+        <form method="post" enctype="multipart/form-data" action="{{ import_discount_codes_url }}" style="display: flex; align-items: center;">
+            {% csrf_token %}
+            <div style="margin-right: 10px;">
+                {{ import_discount_codes_form.as_p }}
+            </div>
+            <button type="submit" class="button" style="padding: 0px 100px; font-size: 16px;">Import Discount Codes</button>
+        </form>
+    </div>
+{% endblock %}

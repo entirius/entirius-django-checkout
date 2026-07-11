@@ -1,0 +1,667 @@
+[
+  {
+    "model": "django_checkout.discountrulecode",
+    "pk": 1,
+    "fields": {
+      "channels": [1],
+      "name": "PERCENT_DISCOUNT",
+      "modifier": "percent_discount",
+      "extra_value": 10,
+      "min_order_amount": "0.00",
+      "free_shipping": false,
+      "free_order": false,
+      "is_omnibus": false,
+      "is_active": true,
+      "target": "all",
+      "priority": 10,
+      "combine_with_other_rules": false,
+      "automatic_applications": false,
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "django_checkout.discountrulecode",
+    "pk": 2,
+    "fields": {
+      "channels": [1],
+      "name": "PERCENT_DISCOUNT_CURRENCY",
+      "modifier": "percent_discount",
+      "extra_value": {
+        "EUR": 10,
+        "PLN": 15,
+        "USD": 12
+      },
+      "min_order_amount": "0.00",
+      "free_shipping": false,
+      "free_order": false,
+      "is_omnibus": false,
+      "is_active": true,
+      "target": "all",
+      "priority": 10,
+      "combine_with_other_rules": false,
+      "automatic_applications": false,
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "django_checkout.discountrulecode",
+    "pk": 3,
+    "fields": {
+      "channels": [1],
+      "name": "PRICE_DISCOUNT",
+      "modifier": "price_discount",
+      "extra_value": 50,
+      "min_order_amount": "0.00",
+      "free_shipping": false,
+      "free_order": false,
+      "is_omnibus": false,
+      "is_active": true,
+      "target": "all",
+      "priority": 10,
+      "combine_with_other_rules": false,
+      "automatic_applications": false,
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "django_checkout.discountrulecode",
+    "pk": 4,
+    "fields": {
+      "channels": [1],
+      "name": "PRICE_DISCOUNT_CURRENCY",
+      "modifier": "price_discount",
+      "extra_value": {
+        "EUR": 5,
+        "PLN": 20,
+        "USD": 6
+      },
+      "min_order_amount": "0.00",
+      "free_shipping": false,
+      "free_order": false,
+      "is_omnibus": false,
+      "is_active": true,
+      "target": "all",
+      "priority": 10,
+      "combine_with_other_rules": false,
+      "automatic_applications": false,
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "django_checkout.discountrulecode",
+    "pk": 5,
+    "fields": {
+      "channels": [1],
+      "name": "STEP_QTY_PERCENT_DISCOUNT",
+      "modifier": "step_qty_percent_discount",
+      "extra_value": {
+        "1": 10,
+        "2": 20,
+        "5": 30
+      },
+      "min_order_amount": "0.00",
+      "free_shipping": false,
+      "free_order": false,
+      "is_omnibus": false,
+      "is_active": true,
+      "target": "all",
+      "priority": 10,
+      "combine_with_other_rules": false,
+      "automatic_applications": false,
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "django_checkout.discountrulecode",
+    "pk": 6,
+    "fields": {
+      "channels": [1],
+      "name": "STEP_QTY_PERCENT_DISCOUNT_CURRENCY",
+      "modifier": "step_qty_percent_discount",
+      "extra_value": {
+        "EUR": {
+          "1": 10,
+          "2": 20,
+          "5": 30
+        },
+        "PLN": {
+          "1": 15,
+          "2": 25,
+          "5": 35
+        }
+      },
+      "min_order_amount": "0.00",
+      "free_shipping": false,
+      "free_order": false,
+      "is_omnibus": false,
+      "is_active": true,
+      "target": "all",
+      "priority": 10,
+      "combine_with_other_rules": false,
+      "automatic_applications": false,
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "django_checkout.discountrulecode",
+    "pk": 7,
+    "fields": {
+      "channels": [1],
+      "name": "STEP_QTY_PERCENT_DISCOUNT_WHOLE_CART",
+      "modifier": "step_qty_percent_discount_whole_cart",
+      "extra_value": {
+        "10": 5,
+        "20": 10,
+        "50": 15
+      },
+      "min_order_amount": "0.00",
+      "free_shipping": false,
+      "free_order": false,
+      "is_omnibus": false,
+      "is_active": true,
+      "target": "all",
+      "priority": 10,
+      "combine_with_other_rules": false,
+      "automatic_applications": false,
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "django_checkout.discountrulecode",
+    "pk": 8,
+    "fields": {
+      "channels": [1],
+      "name": "STEP_QTY_PERCENT_DISCOUNT_WHOLE_CART_CURRENCY",
+      "modifier": "step_qty_percent_discount_whole_cart",
+      "extra_value": {
+        "EUR": {
+          "10": 5,
+          "20": 10,
+          "50": 15
+        },
+        "PLN": {
+          "10": 8,
+          "20": 15,
+          "50": 20
+        }
+      },
+      "min_order_amount": "0.00",
+      "free_shipping": false,
+      "free_order": false,
+      "is_omnibus": false,
+      "is_active": true,
+      "target": "all",
+      "priority": 10,
+      "combine_with_other_rules": false,
+      "automatic_applications": false,
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "django_checkout.discountrulecode",
+    "pk": 9,
+    "fields": {
+      "channels": [1],
+      "name": "STEP_QTY_PRICE_DISCOUNT_WHOLE_CART",
+      "modifier": "step_qty_price_discount_whole_cart",
+      "extra_value": {
+        "5": 100,
+        "10": 250
+      },
+      "min_order_amount": "0.00",
+      "free_shipping": false,
+      "free_order": false,
+      "is_omnibus": false,
+      "is_active": true,
+      "target": "all",
+      "priority": 10,
+      "combine_with_other_rules": false,
+      "automatic_applications": false,
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "django_checkout.discountrulecode",
+    "pk": 10,
+    "fields": {
+      "channels": [1],
+      "name": "STEP_QTY_PRICE_DISCOUNT_WHOLE_CART_CURRENCY",
+      "modifier": "step_qty_price_discount_whole_cart",
+      "extra_value": {
+        "EUR": {
+          "5": 10,
+          "10": 25
+        },
+        "PLN": {
+          "5": 40,
+          "10": 100
+        }
+      },
+      "min_order_amount": "0.00",
+      "free_shipping": false,
+      "free_order": false,
+      "is_omnibus": false,
+      "is_active": true,
+      "target": "all",
+      "priority": 10,
+      "combine_with_other_rules": false,
+      "automatic_applications": false,
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "django_checkout.discountrulecode",
+    "pk": 11,
+    "fields": {
+      "channels": [1],
+      "name": "STEP_PRICE_PERCENT_DISCOUNT",
+      "modifier": "step_price_percent_discount",
+      "extra_value": {
+        "100": 5,
+        "500": 10,
+        "1000": 15
+      },
+      "min_order_amount": "0.00",
+      "free_shipping": false,
+      "free_order": false,
+      "is_omnibus": false,
+      "is_active": true,
+      "target": "all",
+      "priority": 10,
+      "combine_with_other_rules": false,
+      "automatic_applications": false,
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "django_checkout.discountrulecode",
+    "pk": 12,
+    "fields": {
+      "channels": [1],
+      "name": "STEP_PRICE_PERCENT_DISCOUNT_CURRENCY",
+      "modifier": "step_price_percent_discount",
+      "extra_value": {
+        "EUR": {
+          "100": 5,
+          "500": 10
+        },
+        "PLN": {
+          "400": 5,
+          "2000": 10
+        }
+      },
+      "min_order_amount": "0.00",
+      "free_shipping": false,
+      "free_order": false,
+      "is_omnibus": false,
+      "is_active": true,
+      "target": "all",
+      "priority": 10,
+      "combine_with_other_rules": false,
+      "automatic_applications": false,
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "django_checkout.discountrulecode",
+    "pk": 13,
+    "fields": {
+      "channels": [1],
+      "name": "CHEAPEST_GRATIS",
+      "modifier": "cheapest_gratis",
+      "extra_value": 1,
+      "min_order_amount": "0.00",
+      "free_shipping": false,
+      "free_order": false,
+      "is_omnibus": false,
+      "is_active": true,
+      "target": "all",
+      "priority": 10,
+      "combine_with_other_rules": false,
+      "automatic_applications": false,
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "django_checkout.discountrulecode",
+    "pk": 14,
+    "fields": {
+      "channels": [1],
+      "name": "CHEAPEST_GRATIS_CURRENCY",
+      "modifier": "cheapest_gratis",
+      "extra_value": {
+        "EUR": 1,
+        "PLN": 2,
+        "USD": 1
+      },
+      "min_order_amount": "0.00",
+      "free_shipping": false,
+      "free_order": false,
+      "is_omnibus": false,
+      "is_active": true,
+      "target": "all",
+      "priority": 10,
+      "combine_with_other_rules": false,
+      "automatic_applications": false,
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "django_checkout.discountrulecode",
+    "pk": 15,
+    "fields": {
+      "channels": [1],
+      "name": "MOST_EXPENSIVE_GRATIS",
+      "modifier": "most_expensive_gratis",
+      "extra_value": 1,
+      "min_order_amount": "0.00",
+      "free_shipping": false,
+      "free_order": false,
+      "is_omnibus": false,
+      "is_active": true,
+      "target": "all",
+      "priority": 10,
+      "combine_with_other_rules": false,
+      "automatic_applications": false,
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "django_checkout.discountrulecode",
+    "pk": 16,
+    "fields": {
+      "channels": [1],
+      "name": "MOST_EXPENSIVE_GRATIS_CURRENCY",
+      "modifier": "most_expensive_gratis",
+      "extra_value": {
+        "EUR": 1,
+        "PLN": 2,
+        "USD": 1
+      },
+      "min_order_amount": "0.00",
+      "free_shipping": false,
+      "free_order": false,
+      "is_omnibus": false,
+      "is_active": true,
+      "target": "all",
+      "priority": 10,
+      "combine_with_other_rules": false,
+      "automatic_applications": false,
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "django_checkout.discountrulecode",
+    "pk": 17,
+    "fields": {
+      "channels": [1],
+      "name": "GRATIS_STEPPED",
+      "modifier": "gratis_stepped",
+      "extra_value": {
+        "200": 1,
+        "500": 2,
+        "1000": 3
+      },
+      "min_order_amount": "0.00",
+      "free_shipping": false,
+      "free_order": false,
+      "is_omnibus": false,
+      "is_active": true,
+      "target": "all",
+      "priority": 10,
+      "combine_with_other_rules": false,
+      "automatic_applications": false,
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "django_checkout.discountrulecode",
+    "pk": 18,
+    "fields": {
+      "channels": [1],
+      "name": "GRATIS_STEPPED_CURRENCY",
+      "modifier": "gratis_stepped",
+      "extra_value": {
+        "EUR": {
+          "50": 1,
+          "100": 2,
+          "200": 3
+        },
+        "PLN": {
+          "200": 1,
+          "500": 2,
+          "1000": 3
+        }
+      },
+      "min_order_amount": "0.00",
+      "free_shipping": false,
+      "free_order": false,
+      "is_omnibus": false,
+      "is_active": true,
+      "target": "all",
+      "priority": 10,
+      "combine_with_other_rules": false,
+      "automatic_applications": false,
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "django_checkout.discountrulecode",
+    "pk": 19,
+    "fields": {
+      "channels": [1],
+      "name": "STEP_QTY_FIXED_PRICE_PER_CURRENCY",
+      "modifier": "step_qty_fixed_price_per_currency",
+      "extra_value": {
+        "EUR": {
+          "2": 19.95,
+          "5": 15.99
+        },
+        "PLN": {
+          "2": 89,
+          "5": 69
+        }
+      },
+      "min_order_amount": "0.00",
+      "free_shipping": false,
+      "free_order": false,
+      "is_omnibus": false,
+      "is_active": true,
+      "target": "all",
+      "priority": 10,
+      "combine_with_other_rules": false,
+      "automatic_applications": false,
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "django_checkout.discountcode",
+    "pk": 1,
+    "fields": {
+      "code": "PERCENT_DISCOUNT",
+      "rule": 1,
+      "max_used": 999999,
+      "current_used": 0
+    }
+  },
+  {
+    "model": "django_checkout.discountcode",
+    "pk": 2,
+    "fields": {
+      "code": "PERCENT_DISCOUNT_CURRENCY",
+      "rule": 2,
+      "max_used": 999999,
+      "current_used": 0
+    }
+  },
+  {
+    "model": "django_checkout.discountcode",
+    "pk": 3,
+    "fields": {
+      "code": "PRICE_DISCOUNT",
+      "rule": 3,
+      "max_used": 999999,
+      "current_used": 0
+    }
+  },
+  {
+    "model": "django_checkout.discountcode",
+    "pk": 4,
+    "fields": {
+      "code": "PRICE_DISCOUNT_CURRENCY",
+      "rule": 4,
+      "max_used": 999999,
+      "current_used": 0
+    }
+  },
+  {
+    "model": "django_checkout.discountcode",
+    "pk": 5,
+    "fields": {
+      "code": "STEP_QTY_PERCENT_DISCOUNT",
+      "rule": 5,
+      "max_used": 999999,
+      "current_used": 0
+    }
+  },
+  {
+    "model": "django_checkout.discountcode",
+    "pk": 6,
+    "fields": {
+      "code": "STEP_QTY_PCT_DISC_CUR",
+      "rule": 6,
+      "max_used": 999999,
+      "current_used": 0
+    }
+  },
+  {
+    "model": "django_checkout.discountcode",
+    "pk": 7,
+    "fields": {
+      "code": "STEP_QTY_PCT_DISC_CART",
+      "rule": 7,
+      "max_used": 999999,
+      "current_used": 0
+    }
+  },
+  {
+    "model": "django_checkout.discountcode",
+    "pk": 8,
+    "fields": {
+      "code": "STEP_QTY_PCT_DISC_CART_CUR",
+      "rule": 8,
+      "max_used": 999999,
+      "current_used": 0
+    }
+  },
+  {
+    "model": "django_checkout.discountcode",
+    "pk": 9,
+    "fields": {
+      "code": "STEP_QTY_PRICE_DISC_CART",
+      "rule": 9,
+      "max_used": 999999,
+      "current_used": 0
+    }
+  },
+  {
+    "model": "django_checkout.discountcode",
+    "pk": 10,
+    "fields": {
+      "code": "STEP_QTY_PRICE_DISC_CART_CUR",
+      "rule": 10,
+      "max_used": 999999,
+      "current_used": 0
+    }
+  },
+  {
+    "model": "django_checkout.discountcode",
+    "pk": 11,
+    "fields": {
+      "code": "STEP_PRICE_PCT_DISC",
+      "rule": 11,
+      "max_used": 999999,
+      "current_used": 0
+    }
+  },
+  {
+    "model": "django_checkout.discountcode",
+    "pk": 12,
+    "fields": {
+      "code": "STEP_PRICE_PCT_DISC_CUR",
+      "rule": 12,
+      "max_used": 999999,
+      "current_used": 0
+    }
+  },
+  {
+    "model": "django_checkout.discountcode",
+    "pk": 13,
+    "fields": {
+      "code": "CHEAPEST_GRATIS",
+      "rule": 13,
+      "max_used": 999999,
+      "current_used": 0
+    }
+  },
+  {
+    "model": "django_checkout.discountcode",
+    "pk": 14,
+    "fields": {
+      "code": "CHEAPEST_GRATIS_CURRENCY",
+      "rule": 14,
+      "max_used": 999999,
+      "current_used": 0
+    }
+  },
+  {
+    "model": "django_checkout.discountcode",
+    "pk": 15,
+    "fields": {
+      "code": "MOST_EXPENSIVE_GRATIS",
+      "rule": 15,
+      "max_used": 999999,
+      "current_used": 0
+    }
+  },
+  {
+    "model": "django_checkout.discountcode",
+    "pk": 16,
+    "fields": {
+      "code": "MOST_EXPENSIVE_GRATIS_CURRENCY",
+      "rule": 16,
+      "max_used": 999999,
+      "current_used": 0
+    }
+  },
+  {
+    "model": "django_checkout.discountcode",
+    "pk": 17,
+    "fields": {
+      "code": "GRATIS_STEPPED",
+      "rule": 17,
+      "max_used": 999999,
+      "current_used": 0
+    }
+  },
+  {
+    "model": "django_checkout.discountcode",
+    "pk": 18,
+    "fields": {
+      "code": "GRATIS_STEPPED_CURRENCY",
+      "rule": 18,
+      "max_used": 999999,
+      "current_used": 0
+    }
+  },
+  {
+    "model": "django_checkout.discountcode",
+    "pk": 19,
+    "fields": {
+      "code": "STEP_QTY_FIXED_PRICE_CUR",
+      "rule": 19,
+      "max_used": 999999,
+      "current_used": 0
+    }
+  }
+]

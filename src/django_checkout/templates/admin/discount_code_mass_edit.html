@@ -1,0 +1,200 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls static %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+    .mass-edit-form {
+        max-width: 800px;
+        margin: 20px 0;
+    }
+    .form-row {
+        margin-bottom: 15px;
+    }
+    .form-row label {
+        display: block;
+        font-weight: bold;
+        margin-bottom: 5px;
+    }
+    .form-row input {
+        width: 100%;
+        padding: 8px;
+        box-sizing: border-box;
+    }
+    .helptext {
+        display: block;
+        color: #666;
+        font-size: 12px;
+        margin-top: 3px;
+    }
+    .selected-items {
+        background: #f8f8f8;
+        border: 1px solid #ddd;
+        padding: 15px;
+        margin-bottom: 20px;
+        border-radius: 4px;
+    }
+    .selected-items h3 {
+        margin-top: 0;
+    }
+    .preview-list {
+        max-height: 200px;
+        overflow-y: auto;
+        background: white;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 3px;
+    }
+    .preview-item {
+        padding: 5px 0;
+        border-bottom: 1px solid #eee;
+    }
+    .preview-item:last-child {
+        border-bottom: none;
+    }
+    .submit-row {
+        margin-top: 20px;
+        padding: 15px;
+        border-top: 1px solid #ddd;
+        background: #f8f8f8;
+        position: sticky;
+        bottom: 0;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+    form.mass-edit-form .button,
+    form.mass-edit-form button.button {
+        padding: 15px 35px !important;
+        border-radius: 4px !important;
+        border: none !important;
+        cursor: pointer !important;
+        font-size: 14px !important;
+        text-decoration: none !important;
+        display: inline-block !important;
+        white-space: nowrap !important;
+        text-align: center !important;
+        line-height: 1.6 !important;
+        box-sizing: border-box !important;
+        overflow: visible !important;
+        width: auto !important;
+        max-width: none !important;
+        min-width: auto !important;
+        height: auto !important;
+        min-height: 45px !important;
+        vertical-align: middle !important;
+    }
+    form.mass-edit-form button.button.default,
+    form.mass-edit-form .button.default {
+        background-color: #417690 !important;
+        color: white !important;
+        font-weight: bold !important;
+    }
+    form.mass-edit-form button.button.default:hover,
+    form.mass-edit-form .button.default:hover {
+        background-color: #205067 !important;
+    }
+    form.mass-edit-form .button:not(.default),
+    form.mass-edit-form a.button {
+        background-color: #f8f8f8 !important;
+        color: #333 !important;
+        border: 1px solid #ddd !important;
+    }
+    form.mass-edit-form .button:not(.default):hover,
+    form.mass-edit-form a.button:hover {
+        background-color: #e8e8e8 !important;
+    }
+    .warning {
+        background: #fff3cd;
+        border: 1px solid #ffc107;
+        padding: 10px;
+        margin-bottom: 15px;
+        border-radius: 4px;
+    }
+</style>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('Page loaded');
+    var form = document.querySelector('form.mass-edit-form');
+    console.log('Form found:', form);
+    if (form) {
+        form.addEventListener('submit', function(e) {
+            console.log('Form is submitting...');
+            var formData = new FormData(form);
+            console.log('Form data:');
+            for (var pair of formData.entries()) {
+                console.log(pair[0] + ': ' + pair[1]);
+            }
+        });
+    }
+
+    var submitBtn = document.querySelector('button[name="apply"]');
+    console.log('Submit button found:', submitBtn);
+    if (submitBtn) {
+        submitBtn.addEventListener('click', function(e) {
+            console.log('Submit button clicked');
+        });
+    }
+});
+</script>
+{% endblock %}
+
+{% block content %}
+<h1>{{ title }}</h1>
+
+<div class="selected-items">
+    <h3>Zaznaczone kody rabatowe ({{ discount_codes|length }})</h3>
+    <div class="preview-list">
+        {% for code in discount_codes %}
+        <div class="preview-item">
+            <strong>{{ code.code }}</strong> - {{ code.rule.name }}
+            (max_used: {{ code.max_used|default:"∞" }},
+            current_used: {{ code.current_used }},
+            max_products_qty: {{ code.max_products_qty|default:"∞" }})
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<div class="warning">
+    <strong>Uwaga:</strong> Ta akcja zaktualizuje wszystkie zaznaczone kody rabatowe.
+    Tylko wypełnione pola zostaną zmienione - puste pola pozostawią aktualne wartości bez zmian.
+</div>
+
+<form method="post" class="mass-edit-form" action="">
+    {% csrf_token %}
+    <input type="hidden" name="apply" value="1">
+
+    <!-- Hidden fields required for Django Admin actions -->
+    {% for obj in discount_codes %}
+    <input type="hidden" name="_selected_action" value="{{ obj.pk }}">
+    {% endfor %}
+    <input type="hidden" name="action" value="mass_edit_selected">
+
+    {% if form.non_field_errors %}
+    <div class="errornote" style="margin-bottom: 15px;">
+        {{ form.non_field_errors }}
+    </div>
+    {% endif %}
+
+    {% for field in form %}
+    <div class="form-row">
+        <label for="{{ field.id_for_label }}">{{ field.label }}:</label>
+        {{ field }}
+        {% if field.help_text %}
+        <span class="helptext">{{ field.help_text }}</span>
+        {% endif %}
+        {% if field.errors %}
+        <div class="errornote">{{ field.errors }}</div>
+        {% endif %}
+    </div>
+    {% endfor %}
+
+    <div class="submit-row">
+        <button type="submit" class="button default">Zastosuj</button>
+        <a href="{% url 'admin:django_checkout_discountcode_changelist' %}" class="button">Anuluj</a>
+    </div>
+</form>
+
+{% endblock %}

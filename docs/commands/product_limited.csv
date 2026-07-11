@@ -1,0 +1,5 @@
+idx,value,association_type,shipping_method,authentication_state,is_active
+attr_123,,attribute_idx,,all,1
+6,,category_idx,,logged,1
+2295283,,sku,,guest,1
+ftr_is_preorder,True,attribute_value,,all,1

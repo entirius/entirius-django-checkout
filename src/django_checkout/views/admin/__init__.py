@@ -1,0 +1,1 @@
+from django_checkout.views.admin.customer import admin_customer_delete

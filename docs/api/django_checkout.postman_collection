@@ -1,0 +1,1064 @@
+{
+	"info": {
+		"_postman_id": "49b108cd-28f0-4abe-897d-f2e6dcadcfb3",
+		"name": "Volkanos",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Checkout",
+			"item": [
+				{
+					"name": "Cart Create",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Save Cart ID\", function () {\r",
+									"    var jsonData = pm.response.json();\r",
+									"    pm.collectionVariables.set(\"cart_id\", jsonData.data.cart_id);\r",
+									"    console.log(jsonData.data.cart_id);\r",
+									"    pm.expect(jsonData.data.cart_id).to.be.a('string');\r",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access}}",
+								"type": "default",
+								"disabled": true
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"cart\": {\r\n        \"items\": [\r\n            {\"sku\": \"{{sku}}\", \"quantity\": {{qty}}}\r\n        ]\r\n    },\r\n    \"language_code\": \"PL\",\r\n    \"currency_code\": \"PLN\",\r\n    \"country_code\": \"pl\"\r\n}\r\n",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{address}}/checkout/v1/{{channel}}/carts/",
+							"host": [
+								"{{address}}"
+							],
+							"path": [
+								"checkout",
+								"v1",
+								"{{channel}}",
+								"carts",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Cart Edit",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access}}",
+								"type": "default",
+								"disabled": true
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"cart\": {\r\n        \"items\": [\r\n            {\"sku\": \"{{sku}}\", \"quantity\": {{qty}}}\r\n        ],\r\n        \"discounts\": [\r\n            {\"code\": \"test\"}\r\n        ]\r\n    },\r\n    \"addresses\": {\r\n        \"shipping_address\": {\r\n            \"firstname\": \"Test\",\r\n            \"lastname\": \"Testowicz\",\r\n            \"country_code\": \"pl\",\r\n            \"city\": \"Warsaw\",\r\n            \"postcode\": \"00-000\",\r\n            \"street\": \"test street 89\",\r\n            \"dialling_code\": \"+48\",\r\n            \"telephone\": \"500500500\",\r\n            \"email\": \"customer@example.com\",\r\n            \"company\": \"\"\r\n        },\r\n        \"billing_address\": {\r\n            \"firstname\": \"Test\",\r\n            \"lastname\": \"Testowicz\",\r\n            \"country_code\": \"pl\",\r\n            \"city\": \"Warsaw\",\r\n            \"postcode\": \"00-000\",\r\n            \"street\": \"test street 89\",\r\n            \"dialling_code\": \"+48\",\r\n            \"telephone\": \"500500500\",\r\n            \"email\": \"customer@example.com\",\r\n            \"company\": \"Example Co\",\r\n            \"requested_invoice\": false,\r\n            \"tax_id\": \"123456789\"\r\n        }\r\n    },\r\n    \"shipping_method\": {\r\n        \"code\": \"upsstandard\"\r\n    }, \r\n    \"payment_method\": {\r\n        \"code\": \"banktransfer\"\r\n    },\r\n    \"language_code\": \"PL\",\r\n    \"currency_code\": \"PLN\",\r\n    \"country_code\": \"pl\"\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{address}}/checkout/v1/{{channel}}/carts/{{cart_id}}/",
+							"host": [
+								"{{address}}"
+							],
+							"path": [
+								"checkout",
+								"v1",
+								"{{channel}}",
+								"carts",
+								"{{cart_id}}",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Cart Get",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{address}}/checkout/v1/{{channel}}/carts/{{cart_id}}/",
+							"host": [
+								"{{address}}"
+							],
+							"path": [
+								"checkout",
+								"v1",
+								"{{channel}}",
+								"carts",
+								"{{cart_id}}",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Cart Latest",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Save Cart ID\", function () {\r",
+									"    var jsonData = pm.response.json();\r",
+									"    pm.collectionVariables.set(\"cart_id\", jsonData.data.cart_id);\r",
+									"    console.log(jsonData.data.cart_id);\r",
+									"    pm.expect(jsonData.data.cart_id).to.be.a('string');\r",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access}}",
+								"type": "default"
+							}
+						],
+						"url": {
+							"raw": "{{address}}/checkout/v1/{{channel}}/customer/cart/",
+							"host": [
+								"{{address}}"
+							],
+							"path": [
+								"checkout",
+								"v1",
+								"{{channel}}",
+								"customer",
+								"cart",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Cart Update Shipping Address",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access}}",
+								"type": "default",
+								"disabled": true
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"addresses\": {\r\n        \"shipping_address\": {\r\n            \"firstname\": \"Test\",\r\n            \"lastname\": \"Testowicz\",\r\n            \"country_code\": \"pl\",\r\n            \"city\": \"Warsaw\",\r\n            \"postcode\": \"00-000\",\r\n            \"street\": \"test street 89\",\r\n            \"dialling_code\": \"+48\",\r\n            \"telephone\": \"500500500\",\r\n            \"email\": \"customer@example.com\",\r\n            \"company\": \"\"\r\n        }\r\n    }\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{address}}/checkout/v1/{{channel}}/carts/{{cart_id}}/",
+							"host": [
+								"{{address}}"
+							],
+							"path": [
+								"checkout",
+								"v1",
+								"{{channel}}",
+								"carts",
+								"{{cart_id}}",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Cart Update Billing Address",
+					"request": {
+						"method": "PATCH",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"addresses\": {\r\n        \"billing_address\": {\r\n            \"firstname\": \"Test\",\r\n            \"lastname\": \"Testowicz\",\r\n            \"country_code\": \"pl\",\r\n            \"city\": \"Warsaw\",\r\n            \"postcode\": \"00-000\",\r\n            \"street\": \"test street 89\",\r\n            \"dialling_code\": \"+48\",\r\n            \"telephone\": \"500500500\",\r\n            \"email\": \"customer@example.com\",\r\n            \"company\": \"\",\r\n            \"requested_invoice\": false\r\n        }\r\n    }\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{address}}/checkout/v1/{{channel}}/carts/{{cart_id}}/",
+							"host": [
+								"{{address}}"
+							],
+							"path": [
+								"checkout",
+								"v1",
+								"{{channel}}",
+								"carts",
+								"{{cart_id}}",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Cart Update Items",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access}}",
+								"type": "default"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"cart\": {\r\n        \"items\": [\r\n            {\"sku\": \"{{sku}}\", \"quantity\": {{qty}}}\r\n        ]\r\n    }\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{address}}/checkout/v1/{{channel}}/carts/{{cart_id}}/",
+							"host": [
+								"{{address}}"
+							],
+							"path": [
+								"checkout",
+								"v1",
+								"{{channel}}",
+								"carts",
+								"{{cart_id}}",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Cart Update Shipment",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access}}",
+								"type": "default",
+								"disabled": true
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"shipping_method\": {\r\n        \"code\": \"kurier\"\r\n    }\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{address}}/checkout/v1/{{channel}}/carts/{{cart_id}}/",
+							"host": [
+								"{{address}}"
+							],
+							"path": [
+								"checkout",
+								"v1",
+								"{{channel}}",
+								"carts",
+								"{{cart_id}}",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Cart Update Payment",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access}}",
+								"type": "default",
+								"disabled": true
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"payment_method\": {\r\n        \"code\": \"payu_card\",\r\n        \"card\": \"TOKD_1KNTPS5LHOOZ7Wr908k2T4Db74i\"\r\n    }\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{address}}/checkout/v1/{{channel}}/carts/{{cart_id}}/",
+							"host": [
+								"{{address}}"
+							],
+							"path": [
+								"checkout",
+								"v1",
+								"{{channel}}",
+								"carts",
+								"{{cart_id}}",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Cart Update Discount",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Save Cart ID\", function () {\r",
+									"    var jsonData = pm.response.json();\r",
+									"    pm.collectionVariables.set(\"cart_id\", jsonData.data.cart_id);\r",
+									"    console.log(jsonData.data.cart_id);\r",
+									"    pm.expect(jsonData.data.cart_id).to.be.a('string');\r",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access}}",
+								"type": "default",
+								"disabled": true
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"cart\": {\r\n        \"items\": [\r\n            {\"sku\": \"{{sku}}\", \"quantity\": {{qty}}}\r\n        ],\r\n        \"discounts\": [\r\n            {\"code\": \"test\"}\r\n        ]\r\n    }\r\n}\r\n",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{address}}/checkout/v1/{{channel}}/carts/",
+							"host": [
+								"{{address}}"
+							],
+							"path": [
+								"checkout",
+								"v1",
+								"{{channel}}",
+								"carts",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Order Create",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Save Order ID\", function () {\r",
+									"    var jsonData = pm.response.json();\r",
+									"    pm.collectionVariables.set(\"order_id\", jsonData.data.order_id);\r",
+									"    pm.collectionVariables.set(\"order_pretty_id\", jsonData.data.order_pretty_id);\r",
+									"    console.log(jsonData.data.order_id);\r",
+									"    console.log(jsonData.data.order_pretty_id);\r",
+									"    pm.expect(jsonData.data.order_id).to.be.a('string');\r",
+									"    pm.expect(jsonData.data.order_pretty_id).to.be.a('int');\r",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access}}",
+								"type": "default",
+								"disabled": true
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"cart_id\": \"{{cart_id}}\"\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{address}}/checkout/v1/{{channel}}/orders/",
+							"host": [
+								"{{address}}"
+							],
+							"path": [
+								"checkout",
+								"v1",
+								"{{channel}}",
+								"orders",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Order View",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"protocolProfileBehavior": {
+						"disableBodyPruning": true
+					},
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access}}",
+								"type": "default"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{address}}/checkout/v1/{{channel}}/orders/{{order_pretty_id}}",
+							"host": [
+								"{{address}}"
+							],
+							"path": [
+								"checkout",
+								"v1",
+								"{{channel}}",
+								"orders",
+								"{{order_pretty_id}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Order List",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"protocolProfileBehavior": {
+						"disableBodyPruning": true
+					},
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access}}",
+								"type": "default"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{address}}/checkout/v1/{{channel}}/orders/",
+							"host": [
+								"{{address}}"
+							],
+							"path": [
+								"checkout",
+								"v1",
+								"{{channel}}",
+								"orders",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Order Attachment",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"protocolProfileBehavior": {
+						"disableBodyPruning": true
+					},
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "GET",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{address}}/checkout/v1/{{channel}}/orders/{{order_id}}/file/{{file_id}}/customer/{{uid}}",
+							"host": [
+								"{{address}}"
+							],
+							"path": [
+								"checkout",
+								"v1",
+								"{{channel}}",
+								"orders",
+								"{{order_id}}",
+								"file",
+								"{{file_id}}",
+								"customer",
+								"{{uid}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Cart Shipping Methods",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access}}",
+								"type": "default",
+								"disabled": true
+							}
+						],
+						"url": {
+							"raw": "{{address}}/checkout/v1/{{channel}}/carts/{{cart_id}}/shipping-methods/",
+							"host": [
+								"{{address}}"
+							],
+							"path": [
+								"checkout",
+								"v1",
+								"{{channel}}",
+								"carts",
+								"{{cart_id}}",
+								"shipping-methods",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Cart Payment Methods",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access}}",
+								"type": "default",
+								"disabled": true
+							}
+						],
+						"url": {
+							"raw": "{{address}}/checkout/v1/{{channel}}/carts/{{cart_id}}/payment-methods/",
+							"host": [
+								"{{address}}"
+							],
+							"path": [
+								"checkout",
+								"v1",
+								"{{channel}}",
+								"carts",
+								"{{cart_id}}",
+								"payment-methods",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Cart Delivery Points",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access}}",
+								"type": "default",
+								"disabled": true
+							}
+						],
+						"url": {
+							"raw": "{{address}}/checkout/v1/{{channel}}/carts/{{cart_id}}/delivery-points/",
+							"host": [
+								"{{address}}"
+							],
+							"path": [
+								"checkout",
+								"v1",
+								"{{channel}}",
+								"carts",
+								"{{cart_id}}",
+								"delivery-points",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Order List",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"protocolProfileBehavior": {
+						"disableBodyPruning": true
+					},
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access}}",
+								"type": "default"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{address}}/checkout/v1/{{channel}}/orders/",
+							"host": [
+								"{{address}}"
+							],
+							"path": [
+								"checkout",
+								"v1",
+								"{{channel}}",
+								"orders",
+								""
+							]
+						}
+					},
+					"response": []
+				}
+			],
+			"auth": {
+				"type": "apikey",
+				"apikey": [
+					{
+						"key": "value",
+						"value": "{{api-key}}",
+						"type": "string"
+					},
+					{
+						"key": "key",
+						"value": "x-api-key",
+						"type": "string"
+					}
+				]
+			},
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							""
+						]
+					}
+				},
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							""
+						]
+					}
+				}
+			]
+		},
+		{
+			"name": "Accounts",
+			"item": [
+				{
+					"name": "Signup",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"username\": \"test\",\r\n    \"name\": \"test\",\r\n    \"area_code\": \"48\",\r\n    \"phone\": \"123123125\",\r\n    \"email\": \"user@example.com\",\r\n    \"password\": \"Str0ng!Passw0rd\",\r\n    \"agreements\": {\r\n        \"email\": \"True\",\r\n        \"condition\": \"True\"\r\n    }\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{address}}/accounts/v1/customer/signup/",
+							"host": [
+								"{{address}}"
+							],
+							"path": [
+								"accounts",
+								"v1",
+								"customer",
+								"signup",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Token Create",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Save access\", function () {\r",
+									"    var jsonData = pm.response.json();\r",
+									"    var variable_to_save = jsonData.data.access\r",
+									"    pm.collectionVariables.set(\"access\", variable_to_save);\r",
+									"    console.log(variable_to_save);\r",
+									"    pm.expect(variable_to_save).to.be.a('string');\r",
+									"});\r",
+									"pm.test(\"Save refresh\", function () {\r",
+									"    var jsonData = pm.response.json();\r",
+									"    var variable_to_save = jsonData.data.refresh\r",
+									"    pm.collectionVariables.set(\"refresh\", variable_to_save);\r",
+									"    console.log(variable_to_save);\r",
+									"    pm.expect(variable_to_save).to.be.a('string');\r",
+									"});\r",
+									"pm.test(\"Save\", function () {\r",
+									"    var jsonData = pm.response.json();\r",
+									"    pm.collectionVariables.set(\"uid\", jsonData.data.customer_id);\r",
+									"    console.log(jsonData.data.customer_id);\r",
+									"    pm.expect(jsonData.data.customer_id).to.be.a('string');\r",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"email\": \"user@example.com\",\r\n    \"password\": \"Str0ng!Passw0rd\"\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{address}}/accounts/v1/customer/tokens/",
+							"host": [
+								"{{address}}"
+							],
+							"path": [
+								"accounts",
+								"v1",
+								"customer",
+								"tokens",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Refresh token",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Save\", function () {\r",
+									"    var jsonData = pm.response.json();\r",
+									"    pm.collectionVariables.set(\"refresh\", jsonData.data.refresh);\r",
+									"    console.log(jsonData.data.refresh);\r",
+									"    pm.expect(jsonData.data.refresh).to.be.a('string');\r",
+									"});\r",
+									"pm.test(\"Save\", function () {\r",
+									"    var jsonData = pm.response.json();\r",
+									"    pm.collectionVariables.set(\"access\", jsonData.data.access);\r",
+									"    console.log(jsonData.data.access);\r",
+									"    pm.expect(jsonData.data.access).to.be.a('string');\r",
+									"});\r",
+									"pm.test(\"Save\", function () {\r",
+									"    var jsonData = pm.response.json();\r",
+									"    pm.collectionVariables.set(\"uid\", jsonData.data.customer_id);\r",
+									"    console.log(jsonData.data.customer_id);\r",
+									"    pm.expect(jsonData.data.customer_id).to.be.a('string');\r",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"refresh\": \"{{refresh}}\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{address}}/accounts/v1/customer/tokens/refresh/",
+							"host": [
+								"{{address}}"
+							],
+							"path": [
+								"accounts",
+								"v1",
+								"customer",
+								"tokens",
+								"refresh",
+								""
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "PayU Notify",
+			"protocolProfileBehavior": {
+				"followRedirects": false
+			},
+			"request": {
+				"auth": {
+					"type": "noauth"
+				},
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"order\": {\r\n    \"orderId\": \"6NDJ8HZ7J6221103GUEST000P01\",\r\n    \"extOrderId\": \"Id zamówienia w Twoim sklepie\",\r\n    \"orderCreateDate\": \"2012-12-31T12:00:00\",\r\n    \"notifyUrl\": \"http://tempuri.org/notify\",\r\n    \"customerIp\": \"127.0.0.1\",\r\n    \"merchantPosId\": \"Id punktu płatności (pos_id)\",\r\n    \"description\": \"Twój opis zamówienia\",\r\n    \"currencyCode\": \"PLN\",\r\n    \"totalAmount\": \"200\",\r\n    \"buyer\": {\r\n      \"email\": \"john.doe@example.org\",\r\n      \"phone\": \"111111111\",\r\n      \"firstName\": \"John\",\r\n      \"lastName\": \"Doe\",\r\n      \"language\": \"pl\"\r\n    },\r\n    \"payMethod\": {\r\n      \"type\": \"PBL\"\r\n    },\r\n    \"products\": [\r\n      {\r\n        \"name\": \"Product 1\",\r\n        \"unitPrice\": \"200\",\r\n        \"quantity\": \"1\"\r\n      }\r\n    ],\r\n    \"status\": \"COMPLETED\"\r\n  },\r\n  \"localReceiptDateTime\": \"2016-03-02T12:58:14.828+01:00\",\r\n  \"properties\": [\r\n    {\r\n      \"name\": \"PAYMENT_ID\",\r\n      \"value\": \"151471228\"\r\n    }\r\n  ]\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{address}}/checkout/v1/{{channel}}/notify/payu/",
+					"host": [
+						"{{address}}"
+					],
+					"path": [
+						"checkout",
+						"v1",
+						"{{channel}}",
+						"notify",
+						"payu",
+						""
+					]
+				}
+			},
+			"response": []
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "address",
+			"value": "",
+			"type": "default"
+		},
+		{
+			"key": "channel",
+			"value": "",
+			"type": "default"
+		},
+		{
+			"key": "api-key",
+			"value": "",
+			"type": "default"
+		},
+		{
+			"key": "cart_id",
+			"value": ""
+		},
+		{
+			"key": "order_id",
+			"value": "",
+			"type": "default"
+		},
+		{
+			"key": "order_pretty_id",
+			"value": "",
+			"type": "default"
+		},
+		{
+			"key": "access",
+			"value": ""
+		},
+		{
+			"key": "refresh",
+			"value": ""
+		},
+		{
+			"key": "sku",
+			"value": "",
+			"type": "default"
+		},
+		{
+			"key": "qty",
+			"value": "",
+			"type": "default"
+		},
+		{
+			"key": "file_id",
+			"value": "",
+			"type": "default"
+		}
+	]
+}

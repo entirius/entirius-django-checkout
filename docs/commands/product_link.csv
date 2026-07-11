@@ -1,0 +1,5 @@
+idx,value,association_type,shipping_method,authentication_state,is_active
+attr_123,,attribute_idx,default,all,1
+6,,category_idx,default,all,1
+2295283,,sku,default,all,1
+ftr_is_preorder,True,attribute_value,default,all,1
