@@ -141,9 +141,11 @@ v2 price fields use explicit gross/net naming (aligned with Matrix v2).
 | `vault` | entirius-django-vault | card-on-file storage for PayU card payments |
 | `vat` | entirius-django-vat-validator | VIES tax-id validation in cart address validator |
 | `pricetuner` | entirius-django-pricetuner | customer-group pricing behind `USE_PRICE_TUNER_IN_CHECKOUT` |
+| `returns` | entirius-django-returns | returnable-orders lookup in `views/order.py` |
+| `voucher` | entirius-django-checkout-voucher | `VoucherPaymentProvider` (lazy provider import) |
 
 Own satellites `django-returns` and `django-checkout-voucher` are imported lazily with graceful
-fallback; they depend on this package (never the other way round).
+fallback; they depend on this package (never the other way round), hence extras — not runtime deps.
 
 ## Settings Reference
 
