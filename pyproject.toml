@@ -1,6 +1,6 @@
 [project]
 name = "entirius-django-checkout"
-version = "9.0.0"
+version = "9.1.0"
 description = "Checkout engine for Django: carts, orders, payment intents (PayU, PayPal, Autopay, Przelewy24, Paynow, Stripe), shipping, discounts and sale offers"
 authors = [{ name = "Entirius" }]
 readme = "README.md"
@@ -44,6 +44,9 @@ qms        = ["entirius-django-qms>=4.0.0"]            # stock sync command read
 vault      = ["entirius-django-vault>=2.0.0"]          # card-on-file storage for PayU card payments
 vat        = ["entirius-django-vat-validator>=2.0.0"]  # VIES tax-id validation in cart address validator
 pricetuner = ["entirius-django-pricetuner>=2.0.0"]     # customer-group pricing behind USE_PRICE_TUNER_IN_CHECKOUT
+# Own satellites — they depend on this package; imported lazily here (no FK), so optional:
+returns = ["entirius-django-returns>=3.0.0"]                   # returnable-orders lookup in views/order.py
+voucher = ["entirius-django-checkout-voucher>=2.0.0"]          # VoucherPaymentProvider (lazy provider import)
 
 [project.urls]
 Repository = "https://github.com/entirius/entirius-django-checkout"
@@ -89,10 +92,3 @@ pythonpath = ["."]
 
 [tool.deptry]
 pep621_dev_dependency_groups = ["dev", "test"]
-
-[tool.deptry.per_rule_ignores]
-# Own satellites, imported softly (lazy with graceful fallback / TYPE_CHECKING only) and without FK —
-# they depend on this package, not the other way round, so they cannot be runtime dependencies:
-#   django_returns          — lazy import in views/order.py, returns BadRequest when absent (unreleased)
-#   django_checkout_voucher — TYPE_CHECKING hint + lazy provider import with fallback (unreleased)
-DEP001 = ["django_returns", "django_checkout_voucher"]
