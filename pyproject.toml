@@ -1,8 +1,14 @@
 [project]
 name = "entirius-django-checkout"
-version = "9.1.0"
+version = "9.2.0"
 description = "Checkout engine for Django: carts, orders, payment intents (PayU, PayPal, Autopay, Przelewy24, Paynow, Stripe), shipping, discounts and sale offers"
 authors = [{ name = "Entirius" }]
+maintainers = [
+    { name = "Piotr Brzozowski" },
+    { name = "Paweł Kiełt" },
+    { name = "Mateusz Baran" },
+    { name = "Michał Kloczkowski" },
+]
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MPL-2.0"
@@ -42,11 +48,8 @@ test = ["pytest", "pytest-django", "dj-database-url", "psycopg[binary]", "entiri
 # Soft integrations — imported lazily (try/except ImportError) with graceful degradation.
 qms        = ["entirius-django-qms>=4.0.0"]            # stock sync command reads QMS warehouse/xray when present
 vault      = ["entirius-django-vault>=2.0.0"]          # card-on-file storage for PayU card payments
-vat        = ["entirius-django-vat-validator>=2.0.0"]  # VIES tax-id validation in cart address validator
-pricetuner = ["entirius-django-pricetuner>=2.0.0"]     # customer-group pricing behind USE_PRICE_TUNER_IN_CHECKOUT
 # Own satellites — they depend on this package; imported lazily here (no FK), so optional:
 returns = ["entirius-django-returns>=3.0.0"]                   # returnable-orders lookup in views/order.py
-voucher = ["entirius-django-checkout-voucher>=2.0.0"]          # VoucherPaymentProvider (lazy provider import)
 
 [project.urls]
 Repository = "https://github.com/entirius/entirius-django-checkout"

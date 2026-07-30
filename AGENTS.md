@@ -28,6 +28,14 @@ Tech: Django 5, DRF, Pydantic (v2 API), marshmallow (v1 API), PostgreSQL.
 - Migrations are part of the public contract — never edit an already released migration.
 - Default: do not commit — git is the user's call.
 
+## Commit Message Format
+
+**NEVER add `Co-Authored-By: Claude ...` (or any other Claude/Anthropic attribution) to commit messages.**
+
+This overrides the default Claude Code behavior of appending a `Co-Authored-By` trailer. Commit messages MUST contain only the user's authored content — no robot footer, no "Generated with Claude Code" line, no co-author trailer.
+
+Same rule applies to PR descriptions: no `Generated with [Claude Code]` footer.
+
 ## Architecture
 
 ```
@@ -139,13 +147,17 @@ v2 price fields use explicit gross/net naming (aligned with Matrix v2).
 |---|---|---|
 | `qms` | entirius-django-qms | stock sync command reads QMS warehouse/xray sources |
 | `vault` | entirius-django-vault | card-on-file storage for PayU card payments |
-| `vat` | entirius-django-vat-validator | VIES tax-id validation in cart address validator |
-| `pricetuner` | entirius-django-pricetuner | customer-group pricing behind `USE_PRICE_TUNER_IN_CHECKOUT` |
 | `returns` | entirius-django-returns | returnable-orders lookup in `views/order.py` |
-| `voucher` | entirius-django-checkout-voucher | `VoucherPaymentProvider` (lazy provider import) |
 
-Own satellites `django-returns` and `django-checkout-voucher` are imported lazily with graceful
-fallback; they depend on this package (never the other way round), hence extras — not runtime deps.
+Own satellite `django-returns` is imported lazily with graceful fallback; it depends on this
+package (never the other way round), hence an extra — not a runtime dep.
+
+Further integration points degrade gracefully when the integrating package is absent:
+VAT-id validation (`TURN_ON_VIES_VALIDATION_AND_0_VAT_WHEN_VALID_AND_OUTSIDE_PL`), customer-group
+pricing (`USE_PRICE_TUNER_IN_CHECKOUT`) and the voucher payment provider + validation signals
+(`USE_VALIDATE_VOUCHERS_SIGNAL`, `validate_vouchers_signal`, `compute_cart_voucher_total_signal`)
+are lazy imports / signal emissions with no-op fallbacks — the integrating packages ship outside
+this repository.
 
 ## Settings Reference
 
