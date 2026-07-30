@@ -712,7 +712,7 @@ wheels = [
 
 [[package]]
 name = "entirius-django-checkout"
-version = "9.1.0"
+version = "9.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "celery" },
@@ -750,9 +750,6 @@ dev = [
     { name = "pre-commit" },
     { name = "ruff" },
 ]
-pricetuner = [
-    { name = "entirius-django-pricetuner" },
-]
 qms = [
     { name = "entirius-django-qms" },
 ]
@@ -766,14 +763,8 @@ test = [
     { name = "pytest" },
     { name = "pytest-django" },
 ]
-vat = [
-    { name = "entirius-django-vat-validator" },
-]
 vault = [
     { name = "entirius-django-vault" },
-]
-voucher = [
-    { name = "entirius-django-checkout-voucher" },
 ]
 
 [package.metadata]
@@ -788,15 +779,12 @@ requires-dist = [
     { name = "drf-spectacular", specifier = ">=0.27" },
     { name = "entirius-django-accounts", specifier = ">=5.0.0" },
     { name = "entirius-django-captcha", marker = "extra == 'test'", specifier = ">=2.0.0" },
-    { name = "entirius-django-checkout-voucher", marker = "extra == 'voucher'", specifier = ">=2.0.0" },
     { name = "entirius-django-pim", specifier = ">=3.0.0" },
     { name = "entirius-django-pricemanager", specifier = ">=4.0.1" },
-    { name = "entirius-django-pricetuner", marker = "extra == 'pricetuner'", specifier = ">=2.0.0" },
     { name = "entirius-django-qms", marker = "extra == 'qms'", specifier = ">=4.0.0" },
     { name = "entirius-django-regional", specifier = ">=2.0.0" },
     { name = "entirius-django-returns", marker = "extra == 'returns'", specifier = ">=3.0.0" },
     { name = "entirius-django-utils", specifier = ">=2.0.0" },
-    { name = "entirius-django-vat-validator", marker = "extra == 'vat'", specifier = ">=2.0.0" },
     { name = "entirius-django-vault", marker = "extra == 'vault'", specifier = ">=2.0.0" },
     { name = "entirius-py-autopay-sdk", specifier = ">=2.0.0" },
     { name = "entirius-py-bievents", specifier = ">=2.0.0" },
@@ -819,45 +807,7 @@ requires-dist = [
     { name = "stripe", specifier = ">=11.6.0" },
     { name = "tqdm" },
 ]
-provides-extras = ["dev", "test", "qms", "vault", "vat", "pricetuner", "returns", "voucher"]
-
-[[package]]
-name = "entirius-django-checkout-voucher"
-version = "2.0.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "django", version = "5.2.16", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "django", version = "6.0.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "djangorestframework" },
-    { name = "djangorestframework-simplejwt" },
-    { name = "drf-spectacular" },
-    { name = "entirius-django-accounts" },
-    { name = "entirius-django-checkout" },
-    { name = "entirius-django-crypt" },
-    { name = "entirius-django-pim" },
-    { name = "entirius-django-regional" },
-    { name = "entirius-django-utils" },
-    { name = "entirius-py-process-logger" },
-    { name = "pydantic" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/fa/cf/b9ab8b97620923df816aee73cb92fe1c90b047118aeae93aba809609b208/entirius_django_checkout_voucher-2.0.0.tar.gz", hash = "sha256:77a903ac6b0c9e570be50edc972c86037874f9492e26480bbc38419227de442c", size = 1388030, upload-time = "2026-07-12T20:49:02.031Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/20/11/52990ab686c23aa924c94862ce7e897d65630b12d35b625fd858526667f5/entirius_django_checkout_voucher-2.0.0-py3-none-any.whl", hash = "sha256:0edf1d190e58d6fe7fed761954d3b1ecf3282d84ab2fbeb1ae3be63bbeb777f0", size = 130811, upload-time = "2026-07-12T20:49:00.842Z" },
-]
-
-[[package]]
-name = "entirius-django-crypt"
-version = "2.0.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "cryptography" },
-    { name = "django", version = "5.2.16", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "django", version = "6.0.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/7b/68/394c3aff094a3e907101812c74b226a27a67ef7335f6111757bc59f43315/entirius_django_crypt-2.0.0.tar.gz", hash = "sha256:9c4ae51c3f08b68d8f5562d7919c6a2f4c8f8671c478136e7501c127bd2bbf58", size = 39859, upload-time = "2026-07-11T03:19:51.961Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/3b/da/9e40e82f51d962bc9ea90dcd7ede3378e121ea5b3978085494204658d791/entirius_django_crypt-2.0.0-py3-none-any.whl", hash = "sha256:1f31cf81856792cff53154ff8f5eb5e406716741298fdb4da41935250f766ab3", size = 11029, upload-time = "2026-07-11T03:19:51.024Z" },
-]
+provides-extras = ["dev", "test", "qms", "vault", "returns"]
 
 [[package]]
 name = "entirius-django-email"
@@ -940,25 +890,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/d1/8c/069aa997b3e42d5da659dfe653cb9a83ae312bb43dc0eb59e8d6f1859fbc/entirius_django_pricemanager-4.0.1.tar.gz", hash = "sha256:a95d2a998cbb107ee664332b5dcaedefa9df8e46ce03d7a721d489899f48eb6d", size = 132349, upload-time = "2026-07-12T15:37:05.321Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ac/e0/da8d72439b445e8dac7b3399ee86836a0345162e5469ea520428ebda9bae/entirius_django_pricemanager-4.0.1-py3-none-any.whl", hash = "sha256:aa7511e947f72be47410df879d1b3131162c8f59c3df44fbcb84e35b23472c56", size = 99320, upload-time = "2026-07-12T15:37:04.193Z" },
-]
-
-[[package]]
-name = "entirius-django-pricetuner"
-version = "2.0.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "django", version = "5.2.16", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "django", version = "6.0.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "django-admin-inline-paginator" },
-    { name = "entirius-django-accounts" },
-    { name = "entirius-django-pim" },
-    { name = "entirius-django-regional" },
-    { name = "entirius-py-bievents" },
-    { name = "entirius-py-idx-normalizator" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/e5/11/6f3ec0aad15dd52e8630906f8605889f052cb1d59139f67bf153844c5baa/entirius_django_pricetuner-2.0.0.tar.gz", hash = "sha256:fadbf714d6b8a61a8cdfdd0271f6947ddf2c4f60edcb93275d802fc4072ea29d", size = 140044, upload-time = "2026-07-11T15:08:58.348Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/15/f0/780f452594d3a7c1734f7d7ef3770e4b3129d901ea0f1d9bd4267ac64b79/entirius_django_pricetuner-2.0.0-py3-none-any.whl", hash = "sha256:f8b95b8f1ad55490d4cacd49870598dbd4dd0c2d6037d7b095df8081abc071c2", size = 20528, upload-time = "2026-07-11T15:08:57.29Z" },
 ]
 
 [[package]]
@@ -1047,23 +978,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/b3/ba/797d985ba1f80e1ff57ac1c1a13e24c6552215a4742f341d46d5e9143498/entirius_django_utils-2.0.0.tar.gz", hash = "sha256:6fc5171d9cd17455d93453cba667d13f6b1ca0c20b030c8043bfc43365e21517", size = 65938, upload-time = "2026-07-06T16:04:38.031Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/78/d3/457beba27bde2789f2400eb75e1288e64ccf8612681357663a7dabea40b4/entirius_django_utils-2.0.0-py3-none-any.whl", hash = "sha256:730eb5ec42275d3da8a378f6e4a5631c48c587b2c6affe0acd4036c499d34971", size = 27482, upload-time = "2026-07-06T16:04:37.211Z" },
-]
-
-[[package]]
-name = "entirius-django-vat-validator"
-version = "2.0.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "django", version = "5.2.16", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "django", version = "6.0.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "entirius-django-regional" },
-    { name = "entirius-django-utils" },
-    { name = "entirius-py-process-logger" },
-    { name = "marshmallow-dataclass" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/ed/52/69dbfc5f6ad3bb729428234c4a6e4d10a73956599ded8435ddceb24e9ed1/entirius_django_vat_validator-2.0.0.tar.gz", hash = "sha256:8005fa223a798f165615a6e75f71ba90972cf5ef7763ed79e2d4f0937eb3e846", size = 59192, upload-time = "2026-07-10T18:51:52.548Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e3/5c/a2313fdf0990674d2f39b0f8ee3dbb512c12fd5f2be49a066d37369fe897/entirius_django_vat_validator-2.0.0-py3-none-any.whl", hash = "sha256:1004ad5cddb2e06d1d9f20a3206ebf1f98895542f1827ff2893b8ae6ec819771", size = 18093, upload-time = "2026-07-10T18:51:51.36Z" },
 ]
 
 [[package]]
