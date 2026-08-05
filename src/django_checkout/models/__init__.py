@@ -22,6 +22,7 @@ from django_checkout.models.order_attachment import OrderAttachment
 from django_checkout.models.order_status_label import OrderStatusLabel
 from django_checkout.models.payment_intent import PaymentIntent
 from django_checkout.models.payment_method import PaymentMethod
+from django_checkout.models.payment_redirect import PaymentRedirect
 from django_checkout.models.product_representation import ProductRepresentation
 from django_checkout.models.sale_offer import SaleOffer, SaleOfferPrice
 from django_checkout.models.shipping import Shipping

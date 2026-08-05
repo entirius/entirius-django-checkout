@@ -11,6 +11,7 @@ from django.db import models
 from django.db.models import Case, DecimalField, F, OuterRef, Q, Subquery, Value, When
 from django_pim.models import Product
 
+from django_checkout.compat import check_constraint
 from django_checkout.domain.dto.item import SkuQuantityData
 from django_checkout.domain.shipping import get_delivery_matrix_prices
 from django_checkout.enums import PriceType
@@ -283,7 +284,7 @@ class ShippingOption(models.Model):
             models.UniqueConstraint(
                 fields=["method", "country_code", "currency"], name="one_currency_per_country_per_method"
             ),
-            models.CheckConstraint(
+            check_constraint(
                 condition=(
                     Q(country_code="FAKE", country__isnull=True)  # Fake deprecated - make migrations in major version
                     | Q(country_code="ALL", country__isnull=True)
@@ -291,7 +292,7 @@ class ShippingOption(models.Model):
                 ),
                 name="has_country_or_avaliable_for_all",
             ),
-            models.CheckConstraint(
+            check_constraint(
                 condition=(
                     (Q(cash_on_delivery_available=False) & Q(cash_on_delivery_fee__isnull=True))
                     | (Q(cash_on_delivery_available=True) & Q(cash_on_delivery_fee__isnull=False))

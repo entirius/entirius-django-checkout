@@ -22,6 +22,7 @@ from django_checkout.enums import OrderStatus
 from django_checkout.models import Order, OrderAttachment, OrderStatusLabel, StockReservation
 from django_checkout.schemas.common import format_money
 from django_checkout.services.order_service import order_lookup_q
+from django_checkout.utils import redact_payment_secrets
 
 logger = logging.getLogger("checkout.v2.admin")
 
@@ -105,7 +106,7 @@ class AdminOrderDetailView(CheckoutChannelMixin, APIView):
                 "billing_email": order.billing_email,
                 "shipping_email": order.shipping_email,
                 "customer_uid": str(order.customer.user.username) if order.customer else None,
-                "order_body": _redact_payment_secrets(order.order_body),
+                "order_body": redact_payment_secrets(order.order_body),
                 "payment_intents": [
                     {"code": pi.code, "status": pi.payment_status, "external_order_id": pi.external_order_id}
                     for pi in order.payment_items.all()
@@ -265,22 +266,3 @@ def _serialize_order_list_item(order, channel, labels):
         "billing_email": order.billing_email,
         "customer_uid": str(order.customer.user.username) if order.customer else None,
     }
-
-
-def _redact_payment_secrets(order_body: dict | None) -> dict:
-    """Strip card tokens, auth tokens, and redirect URLs from order_body before API response.
-
-    These exist in the DB (needed by payment provider integration at order creation time)
-    but must never be exposed via the admin API.
-    """
-    if not order_body:
-        return order_body or {}
-    import copy
-
-    body = copy.deepcopy(order_body)
-    pm = body.get("payment_method")
-    if pm and isinstance(pm, dict):
-        for secret_key in ("card", "authorization_token", "continue_url"):
-            if secret_key in pm:
-                pm[secret_key] = "***REDACTED***"
-    return body

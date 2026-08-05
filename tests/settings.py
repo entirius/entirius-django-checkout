@@ -55,5 +55,17 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "2.0.0",
 }
 
+# The IP rate limiter is cache-backed, so pin the backend rather than inheriting a
+# default. LocMem supports incr() and raises ValueError on a missing key, same as
+# django-redis in production.
+CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
+
+# The v1 views authenticate through django.contrib.auth, which needs the JWT backend
+# wired up; the v2 tests use force_authenticate and never reach it.
+AUTHENTICATION_BACKENDS = [
+    "django_accounts.backends.JWTAccessBackend",
+    "django.contrib.auth.backends.ModelBackend",
+]
+
 # Checkout-specific settings
 API_BASE_URL = "/api/"

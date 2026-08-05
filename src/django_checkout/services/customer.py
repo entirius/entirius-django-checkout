@@ -6,6 +6,7 @@ from django.db.models import Q
 from process_logger import ProcessLoggerMixin
 
 from django_checkout.models import Cart, Order
+from django_checkout.signals import customer_anonymized_signal
 
 
 class CustomerService(ProcessLoggerMixin):
@@ -16,8 +17,10 @@ class CustomerService(ProcessLoggerMixin):
         orders_idxs = []
         orders_fail = []
 
+        all_order_ids: list[str] = []
         orders = Order.objects.filter(Q(customer__user__email=email) | Q(order_body__icontains=email))
         for order in orders:
+            all_order_ids.append(str(order.order_id))
             self.logger.add_log_param_once("order_id", order.pretty_id)
             self.logger.add_log_param_once("order_idx", str(order.order_id))
             try:
@@ -57,6 +60,15 @@ class CustomerService(ProcessLoggerMixin):
                 continue
             else:
                 self.logger.delete_log_param("cart_id")
+
+        # send_robust so a failing downstream receiver (e.g. voucher PII scrub) can't
+        # abort the erasure; a receiver exception still flips success=False.
+        for _, response in customer_anonymized_signal.send_robust(
+            sender=self.__class__, email=email, order_ids=list(set(all_order_ids))
+        ):
+            if isinstance(response, Exception):
+                self.logger.exception(response)
+                success = False
 
         orders_idxs = list(set(orders_idxs))
         carts_idxs = list(set(carts_idxs))

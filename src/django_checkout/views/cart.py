@@ -20,11 +20,14 @@ from django_utils.api.responses import ErrorInfo, Response
 from django_utils.settings import HEADER_COUNTRY
 from process_logger import ProcessLogger
 
+from django_checkout import settings as checkout_settings
 from django_checkout.domain.cart import process_cart
 from django_checkout.domain.dto.cart import CartMerge, CartRequest, CartResponse, CheckoutData, ItemData
-from django_checkout.enums import CartStatus
+from django_checkout.enums import CartStatus, PaymentProvider
 from django_checkout.models import Cart
+from django_checkout.utils import redact_payment_secrets
 from django_checkout.utils.api.decorators import channel_view
+from django_checkout.utils.api.throttling import enforce_ip_rate_limit
 
 logger_process = ProcessLogger("CHECKOUT_CART")
 
@@ -48,13 +51,44 @@ def prepare_errors_and_messages(messages):
 # Providers that need a persisted Cart row to apply side-effects (e.g. voucher
 # creates CartVoucher rows). Keep this set minimal — adding a provider here
 # doubles the cost of `POST /carts/` for any cart using it.
-_ATTACH_SIDE_EFFECT_PROVIDERS = frozenset({"voucher"})
+_ATTACH_SIDE_EFFECT_PROVIDERS = frozenset({PaymentProvider.VOUCHER})
+
+
+def _carries_pay_code(payment_method) -> bool:
+    """True iff any payment entry carries a pay_code (voucher code + PIN, or BLIK).
+
+    Same shape tolerance as _has_attach_side_effect_pm: parsed DTO list, or the legacy
+    single dict.
+    """
+    if not payment_method:
+        return False
+    pms = payment_method if isinstance(payment_method, list) else [payment_method]
+    for pm in pms:
+        code = pm.pay_code if hasattr(pm, "pay_code") else (pm.get("pay_code") if isinstance(pm, dict) else None)
+        if code:
+            return True
+    return False
+
+
+def _throttle_pay_code(request, payment_method) -> None:
+    """Rate-limit only the requests that actually carry a pay_code.
+
+    Throttling every cart write would punish ordinary editing; the brute-force vector is
+    specifically the guessable code, so that is what gets the limit.
+    """
+    if _carries_pay_code(payment_method):
+        enforce_ip_rate_limit(
+            request,
+            scope="pay_code",
+            limit=checkout_settings.PAY_CODE_RATE_LIMIT,
+            window_seconds=checkout_settings.PAY_CODE_RATE_WINDOW_SECONDS,
+        )
 
 
 def _has_attach_side_effect_pm(payment_method) -> bool:
     """True iff at least one payment method's code is in _ATTACH_SIDE_EFFECT_PROVIDERS.
 
-    Accepts the parsed CartRequest.payment_method (a List[PaymentData] DTO).
+    Accepts the parsed CartRequest.payment_method (a list[PaymentData] DTO).
     Backward-compatible with the legacy single-dict shape.
     """
     if not payment_method:
@@ -74,6 +108,7 @@ def _has_attach_side_effect_pm(payment_method) -> bool:
 @parse_body(CartRequest.Schema)
 @save_ip_and_country
 def post_cart(request, body: CartRequest, *args, **kwargs):
+    _throttle_pay_code(request, body.payment_method)
     customer = (
         request.user.customer if (request.user is not None and getattr(request.user, "is_customer", False)) else None
     )
@@ -105,7 +140,7 @@ def post_cart(request, body: CartRequest, *args, **kwargs):
     response_body = CartResponse(
         cart_id=record.cart_id,
         cart_status=record.cart_status,
-        **record.cart_body,
+        **redact_payment_secrets(record.cart_body),
         free_shipping=record.is_eglible_for_free_shipping,
         can_be_split=record.is_egible_for_split,
         amount_required_for_free_shipping=record.amount_required_for_free_shipping,
@@ -142,7 +177,7 @@ def get_latest_cart(request, *args, **kwargs):
     response_body = CartResponse(
         cart_id=record.cart_id,
         cart_status=record.cart_status,
-        **record.cart_body,
+        **redact_payment_secrets(record.cart_body),
         free_shipping=record.is_eglible_for_free_shipping,
         can_be_split=record.is_egible_for_split,
         amount_required_for_free_shipping=record.amount_required_for_free_shipping,
@@ -213,7 +248,7 @@ def merge_cart(request, params: CartMerge, quest_cart_id, *args, **kwargs):
         response_body = CartResponse(
             cart_id=customer_record.cart_id,
             cart_status=customer_record.cart_status,
-            **customer_record.cart_body,
+            **redact_payment_secrets(customer_record.cart_body),
             can_be_split=customer_record.is_egible_for_split,
             free_shipping=customer_record.is_eglible_for_free_shipping,
             amount_required_for_free_shipping=customer_record.amount_required_for_free_shipping,
@@ -247,6 +282,7 @@ def get_or_put_cart(request, cart_id, *args, **kwargs):
 
     @parse_body(CartRequest.Schema)
     def put_cart(request, cart_id, body: CartRequest, *args, **kwargs):
+        _throttle_pay_code(request, body.payment_method)
         record = Cart.objects.get_record(request, cart_id)
 
         customer = request.user.customer if (request.user is not None and request.user.is_customer) else None
@@ -267,7 +303,7 @@ def get_or_put_cart(request, cart_id, *args, **kwargs):
             response_body = CartResponse(
                 cart_id=record.cart_id,
                 cart_status=record.cart_status,
-                **record.cart_body,
+                **redact_payment_secrets(record.cart_body),
                 free_shipping=record.is_eglible_for_free_shipping,
                 can_be_split=record.is_egible_for_split,
                 amount_required_for_free_shipping=record.amount_required_for_free_shipping,
@@ -302,7 +338,7 @@ def get_or_put_cart(request, cart_id, *args, **kwargs):
             response_body = CartResponse(
                 cart_id=record.cart_id,
                 cart_status=record.cart_status,
-                **record.cart_body,
+                **redact_payment_secrets(record.cart_body),
                 free_shipping=record.is_eglible_for_free_shipping,
                 can_be_split=record.is_egible_for_split,
                 amount_required_for_free_shipping=record.amount_required_for_free_shipping,
@@ -321,6 +357,7 @@ def get_or_put_cart(request, cart_id, *args, **kwargs):
 
     @parse_body(CartRequest.Schema)
     def update_cart(request, cart_id, body: CartRequest, *args, **kwargs):
+        _throttle_pay_code(request, body.payment_method)
         record = Cart.objects.get_record(request, cart_id)
         customer = request.user.customer if (request.user is not None and request.user.is_customer) else None
         if record is None:
@@ -343,7 +380,7 @@ def get_or_put_cart(request, cart_id, *args, **kwargs):
             response_body = CartResponse(
                 cart_id=record.cart_id,
                 cart_status=record.cart_status,
-                **record.cart_body,
+                **redact_payment_secrets(record.cart_body),
                 free_shipping=record.is_eglible_for_free_shipping,
                 can_be_split=record.is_egible_for_split,
                 amount_required_for_free_shipping=record.amount_required_for_free_shipping,
@@ -380,7 +417,7 @@ def get_or_put_cart(request, cart_id, *args, **kwargs):
             response_body = CartResponse(
                 cart_id=record.cart_id,
                 cart_status=record.cart_status,
-                **record.cart_body,
+                **redact_payment_secrets(record.cart_body),
                 free_shipping=record.is_eglible_for_free_shipping,
                 can_be_split=record.is_egible_for_split,
                 amount_required_for_free_shipping=record.amount_required_for_free_shipping,

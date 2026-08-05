@@ -107,6 +107,18 @@ def auth_api_client(api_client, api_key):
 
 
 @pytest.fixture
+def customer(db, regular_user):
+    """django_accounts Customer for regular_user.
+
+    The v2 customer endpoints resolve the caller through ``request.user.customer``,
+    so an authenticated user without this row is treated as anonymous.
+    """
+    from django_accounts.models import Customer
+
+    return Customer.objects.create(user=regular_user)
+
+
+@pytest.fixture
 def auth_customer_client(api_client, api_key, regular_user):
     """API client with both X-API-KEY and JWT auth (authenticated customer)."""
     api_client.credentials(HTTP_X_API_KEY=api_key.key)

@@ -6,6 +6,8 @@
 
 from decimal import Decimal
 
+import pytest
+
 from django_checkout.schemas.common import format_money, format_tax_rate
 
 
@@ -226,3 +228,35 @@ class TestErrorMapper:
         assert details[0]["code"] == "GENERAL_WARNING"
         assert details[1]["code"] == "DISCOUNT_EXPIRED"
         assert details[1]["scope"] == "discounts"
+
+
+class TestVoucherGiftBounds:
+    """ItemInput.voucher_gift stays opaque but bounded (denies unbounded write channel)."""
+
+    def _item(self, gift):
+        from django_checkout.schemas.requests.cart import ItemInput
+
+        return ItemInput(sku="X", quantity=1, voucher_gift=gift)
+
+    def test_accepts_normal_gift(self):
+        item = self._item({"template_idx": "classic", "recipient_name": "Ala", "message": "Hej"})
+        assert item.voucher_gift["template_idx"] == "classic"
+
+    def test_none_ok(self):
+        assert self._item(None).voucher_gift is None
+
+    def test_rejects_nested_value(self):
+        with pytest.raises(ValueError, match="scalars"):
+            self._item({"x": {"deep": 1}})
+
+    def test_rejects_too_many_keys(self):
+        with pytest.raises(ValueError, match="at most"):
+            self._item({f"k{i}": "v" for i in range(20)})
+
+    def test_rejects_oversized_value(self):
+        with pytest.raises(ValueError, match="exceeds"):
+            self._item({"message": "x" * 600})
+
+    def test_rejects_oversized_total(self):
+        with pytest.raises(ValueError, match="chars total"):
+            self._item({f"k{i}": "y" * 300 for i in range(10)})

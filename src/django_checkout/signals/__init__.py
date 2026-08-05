@@ -1,5 +1,6 @@
 from .signals import (
     compute_cart_voucher_total_signal,
+    customer_anonymized_signal,
     order_additional_info,
     order_canceled_signal,
     order_confirmed_signal,

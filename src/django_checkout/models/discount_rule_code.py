@@ -10,6 +10,8 @@ from django.db.models import TextChoices
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from django_checkout.compat import check_constraint
+
 if TYPE_CHECKING:
     pass
 
@@ -130,44 +132,44 @@ class DiscountRuleCode(models.Model):
         verbose_name = "Discount Rule: Code"
         verbose_name_plural = "Discount Rules: Code"
         constraints = [
-            models.CheckConstraint(
+            check_constraint(
                 condition=models.Q(modifier=ModifiersForDiscountRule.PERCENT_DISCOUNT) | models.Q(extra_value__gt=0),
                 name="check_extra_value_positive_int_percent_discount",
             ),
-            models.CheckConstraint(
+            check_constraint(
                 condition=models.Q(modifier=ModifiersForDiscountRule.PRICE_DISCOUNT) | models.Q(extra_value__gt=0),
                 name="check_extra_value_positive_int_price_discount",
             ),
-            models.CheckConstraint(
+            check_constraint(
                 condition=models.Q(modifier=ModifiersForDiscountRule.STEP_QTY_PERCENT_DISCOUNT)
                 | models.Q(extra_value__isnull=False),
                 name="check_extra_value_not_empty_dict_step_qty_percent_discount",
             ),
-            models.CheckConstraint(
+            check_constraint(
                 condition=models.Q(modifier=ModifiersForDiscountRule.STEP_PRICE_PERCENT_DISCOUNT)
                 | models.Q(extra_value__isnull=False),
                 name="check_extra_value_not_empty_dict_step_price_percent_discount",
             ),
-            models.CheckConstraint(
+            check_constraint(
                 condition=models.Q(modifier=ModifiersForDiscountRule.STEP_QTY_FIXED_PRICE_PER_CURRENCY)
                 | models.Q(extra_value__isnull=False),
                 name="check_extra_value_not_empty_dict_step_qty_fixed_price_per_currency",
             ),
-            models.CheckConstraint(
+            check_constraint(
                 condition=models.Q(modifier=ModifiersForDiscountRule.CHEAPEST_GRATIS) | models.Q(extra_value__gt=0),
                 name="check_extra_value_positive_int_cheapest_gratis",
             ),
-            models.CheckConstraint(
+            check_constraint(
                 condition=models.Q(modifier=ModifiersForDiscountRule.MOST_EXPENSIVE_GRATIS)
                 | models.Q(extra_value__gt=0),
                 name="check_extra_value_positive_int_most_expensive",
             ),
-            models.CheckConstraint(
+            check_constraint(
                 condition=models.Q(modifier=ModifiersForDiscountRule.GRATIS_STEPPED)
                 | models.Q(extra_value__isnull=False),
                 name="check_extra_value_not_empty_dict_gratis_stepped",
             ),
-            models.CheckConstraint(
+            check_constraint(
                 condition=models.Q(modifier=ModifiersForDiscountRule.GRATIS_BY_SKU_IN_CART)
                 | models.Q(extra_value__isnull=False),
                 name="check_extra_value_not_empty_list_gratis_by_sku_in_cart",

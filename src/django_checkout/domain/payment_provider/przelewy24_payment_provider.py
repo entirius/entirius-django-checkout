@@ -59,8 +59,8 @@ class Przelewy24PaymentProvider(BasePaymentProvider, ProcessLoggerMixin):
             sandbox=self._sandbox_setting(self.payment_method),
         )
         self.authorize(przelewy24)
-        self.provider_request = self.build_przelewy24_data(przelewy24, order, cart)
         try:
+            self.provider_request = self.build_przelewy24_data(przelewy24, order, cart)
             response_body, redirect_url_panel = przelewy24.create_transaction(transaction_data=self.provider_request)
             self.redirect_url = redirect_url_panel
             order_id = str(order.order_id)
@@ -149,7 +149,9 @@ class Przelewy24PaymentProvider(BasePaymentProvider, ProcessLoggerMixin):
         url_status = "przelewy24-notify"
         full_url_status = self.get_notify_url(url_status)
         # Utwrz URL do return
-        url_return = self.payment_method.additional_data["return_url"] + "?order_id=" + str(order.pretty_id)
+        url_return = self.resolve_continue_url(
+            self.payment_method.additional_data["return_url"] + "?order_id=" + str(order.pretty_id), order
+        )
         # Pobierz dostępne metody płatności
         payment_method_value = self.payment_method.additional_data.get("payment_method", None)
 

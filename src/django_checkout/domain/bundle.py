@@ -6,6 +6,12 @@ from itertools import groupby
 from operator import itemgetter
 
 from django_pim.models.product_bundle.bundle_link import BundleLink
+from django_pim.services.bundle_data import (
+    get_bundle_limits,
+    get_bundle_subproducts,
+    get_default_subproducts,
+)
+from django_pricemanager.output_bundle import get_aggregated_bundle_price
 
 from django_checkout.domain.dto.item import ItemData
 from django_checkout.domain.prices import fetch_prices
@@ -52,6 +58,117 @@ def bundle_data_factory(items: list[ItemData] = None, items_list: list = None):
 
     grouped_data = get_grouped_data(list(bundle_links_data))
     return grouped_data
+
+
+def get_active_subproducts(
+    subproducts_data: dict,
+    bundle_limit: dict | None,
+    frontend_selection: dict | None,
+) -> dict:
+    """Checkout's add-to-cart selection rule. Returns {sub_sku: qty_per_one_bundle}.
+
+    - Legacy bundle (no limits) → all subproducts × their BundleLink.quantity.
+    - Ranged bundle, no frontend selection → defers to PIM's pure rule
+      (is_required OR is_default).
+    - Ranged bundle, with frontend selection → is_required (always) + frontend-picked SKUs.
+      Per-sku quantity comes from frontend if can_change_quantity=True, else from BundleLink.
+    """
+    if not bundle_limit:
+        return {sub_sku: meta["quantity"] for sub_sku, meta in subproducts_data.items()}
+    if not frontend_selection:
+        return get_default_subproducts(subproducts_data)
+
+    active: dict = {}
+    for sub_sku, meta in subproducts_data.items():
+        if meta["is_required"]:
+            active[sub_sku] = meta["quantity"]
+        elif sub_sku in frontend_selection:
+            qty = frontend_selection[sub_sku] if meta["can_change_quantity"] else meta["quantity"]
+            active[sub_sku] = qty
+    return active
+
+
+def resolve_bundle_prices(
+    items: list,
+    channel,
+    country: str,
+    currency: str,
+    prices_by_sku: dict,
+    uid: str | None = None,
+) -> dict:
+    """For each ranged bundle item in `items`, replace its entry in `prices_by_sku`
+    with a price aggregated from its active subproducts (frontend selection or
+    defaults). Legacy bundles (no min/max limit) are left untouched so existing
+    fixed-price flows keep working.
+
+    Mutates and returns `prices_by_sku`.
+    """
+    if not items:
+        return prices_by_sku
+
+    sku_list = [item.sku for item in items if hasattr(item, "sku")]
+    if not sku_list:
+        return prices_by_sku
+
+    bundles_data = get_bundle_subproducts(channel.idx, sku_list)
+    if not bundles_data:
+        return prices_by_sku
+
+    bundle_limits = get_bundle_limits(channel.idx, sku_list)
+    if not bundle_limits:
+        return prices_by_sku
+
+    for item in items:
+        if not isinstance(item, ItemData):
+            continue
+        bundle_sku = item.sku
+        subproducts_data = bundles_data.get(bundle_sku)
+        if not subproducts_data:
+            continue
+        bundle_limit = bundle_limits.get(bundle_sku)
+        if not bundle_limit:
+            # Legacy bundle — keep its own pricelist row, do not aggregate.
+            continue
+
+        frontend_selection = (
+            {sub.sku: sub.quantity for sub in item.sub_items} if getattr(item, "sub_items", None) else None
+        )
+        active = get_active_subproducts(subproducts_data, bundle_limit, frontend_selection)
+        if not active:
+            continue
+
+        snapshot, _verified_only = get_aggregated_bundle_price(
+            channel_idx=channel.idx,
+            country_code=country,
+            currency_code=currency,
+            bundle_sku=bundle_sku,
+            components_quantities=active,
+            uid=uid,
+        )
+        if snapshot is None:
+            continue
+        prices_by_sku[item.sku_identifier] = _snapshot_to_standard_price_dict(snapshot, bundle_sku, uid)
+
+    return prices_by_sku
+
+
+def _snapshot_to_standard_price_dict(snapshot: dict, bundle_sku: str, uid: str | None) -> dict:
+    """Map pricemanager's aggregated snapshot to the dict shape produced by
+    Price.get_standard_price() — what fetch_prices uses as values in prices_by_sku.
+    """
+    return {
+        "product": bundle_sku,
+        "tax_class": None,
+        "gross": snapshot["gross"],
+        "net": snapshot["net"],
+        "special_gross": snapshot["special_gross"],
+        "special_net": snapshot["special_net"],
+        "tax_rate": snapshot["tax_rate"],
+        "special_from_date": snapshot["special_from_date"],
+        "special_to_date": snapshot["special_to_date"],
+        "is_egible_for_special_price": snapshot["has_special_price"],
+        "uid": uid,
+    }
 
 
 def validate_bundle_price_vs_products_price(bundles, channel, country, currency):

@@ -46,7 +46,9 @@ class PayUBlikPaymentProvider(PayUPaymentProvider, ProcessLoggerMixin):
         return PayUOrder(
             extOrderId=order.pretty_id,
             notifyUrl=self.get_notify_url(),
-            continueUrl=order_dto.primary_payment_method.add_order_id_to_continue_url(order.pretty_id),
+            continueUrl=self.resolve_continue_url(
+                order_dto.primary_payment_method.add_order_id_to_continue_url(order.pretty_id), order
+            ),
             customerIp=self.get_client_ip(),
             merchantPosId=self.payment_method.additional_data["pos_id"],
             description=f"BLIK Order: {order.pretty_id}",
@@ -60,7 +62,6 @@ class PayUBlikPaymentProvider(PayUPaymentProvider, ProcessLoggerMixin):
     def process_order(self, order: "Order", cart: Optional["Cart"] = None) -> str:
         self.check_connection_data()
 
-        self.provider_request = self.build_payu_data(order, cart)
         order_dto = order.as_data
 
         if self.customer and self.customer.customer.user.email and self.customer.ext_customer_id:
@@ -81,6 +82,7 @@ class PayUBlikPaymentProvider(PayUPaymentProvider, ProcessLoggerMixin):
         payu.authorize()
 
         try:
+            self.provider_request = self.build_payu_data(order, cart)
             order_id, *_ = payu.create_order(self.provider_request)
             self.redirect_url = order_dto.primary_payment_method.add_order_id_to_continue_url(order.pretty_id)
             self.order_id = order_id

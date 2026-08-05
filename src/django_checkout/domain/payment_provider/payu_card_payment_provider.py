@@ -92,7 +92,9 @@ class PayUCardPaymentProvider(PayUPaymentProvider, ProcessLoggerMixin):
         payu_order = PayUOrder(
             extOrderId=order.pretty_id,
             notifyUrl=self.get_notify_url(),
-            continueUrl=order_dto.primary_payment_method.add_order_id_to_continue_url(order.pretty_id),
+            continueUrl=self.resolve_continue_url(
+                order_dto.primary_payment_method.add_order_id_to_continue_url(order.pretty_id), order
+            ),
             customerIp=self.get_client_ip(),
             merchantPosId=self.payment_method.additional_data["pos_id"],
             description=order.pretty_id,

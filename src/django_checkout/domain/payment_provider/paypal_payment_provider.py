@@ -123,10 +123,15 @@ class PayPalPaymentProvider(BasePaymentProvider, ProcessLoggerMixin):
             products.append(product)
         return products
 
-    def create_application_context(self, order_pretty_id: str) -> ApplicationContext:
+    def create_application_context(self, order: "Order") -> ApplicationContext:
+        order_pretty_id = order.pretty_id
         return ApplicationContext(
-            return_url=self.payment_method.additional_data["return_url"] + "?order_id=" + str(order_pretty_id),
-            cancel_url=self.payment_method.additional_data["cancel_url"] + "?order_id=" + str(order_pretty_id),
+            return_url=self.resolve_continue_url(
+                self.payment_method.additional_data["return_url"] + "?order_id=" + str(order_pretty_id), order
+            ),
+            cancel_url=self.resolve_continue_url(
+                self.payment_method.additional_data["cancel_url"] + "?order_id=" + str(order_pretty_id), order
+            ),
         )
 
     def map_order(
@@ -178,7 +183,7 @@ class PayPalPaymentProvider(BasePaymentProvider, ProcessLoggerMixin):
                 )
             ],
             intent="CAPTURE",
-            application_context=self.create_application_context(order.pretty_id),
+            application_context=self.create_application_context(order),
             payer=payer,
             payment_source=payment_source,
         )

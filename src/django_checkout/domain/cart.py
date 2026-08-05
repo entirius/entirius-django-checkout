@@ -336,11 +336,17 @@ def process_cart(
     # second pass produces the authoritative voucher_amount_applied for this check.
     voucher_coverage_insufficient = False
     if cart is not None and payment_methods:
-        non_voucher_pm = [pm for pm in payment_methods if getattr(pm, "provider", None) != "voucher"]
-        remaining_to_pay = Decimal(str(validated_cart_data.total_price or 0))
+        from django_checkout.enums import PaymentProvider
+
+        non_voucher_pm = [
+            pm
+            for pm in payment_methods
+            if not PaymentProvider.is_voucher(getattr(pm, "provider", None), getattr(pm, "code", None))
+        ]
+        remaining_to_pay = Decimal(str(total or 0))
+        voucher_paid = Decimal(str(validated_cart_data.voucher_amount_applied or 0))
         if not non_voucher_pm and remaining_to_pay > Decimal("0"):
             voucher_coverage_insufficient = True
-            voucher_paid = Decimal(str(validated_cart_data.voucher_amount_applied or 0))
             cart_total_before_voucher = voucher_paid + remaining_to_pay
             messages.append(
                 ErrorInfo(
@@ -358,6 +364,15 @@ def process_cart(
                     },
                 )
             )
+        elif non_voucher_pm and voucher_paid > Decimal("0") and remaining_to_pay <= Decimal("0"):
+            # Voucher covers 100% — drop the now-redundant gateway method(s).
+            drop_codes = {getattr(pm, "code", None) for pm in non_voucher_pm}
+            payment_methods = [
+                pm
+                for pm in payment_methods
+                if PaymentProvider.is_voucher(getattr(pm, "provider", None), getattr(pm, "code", None))
+            ]
+            validated_payments = [vp for vp in (validated_payments or []) if vp.code not in drop_codes]
 
     if validated_cart_data.tax_amount is not None:
         total_tax = (
