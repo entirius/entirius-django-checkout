@@ -12,3 +12,6 @@ order_canceled_signal = Signal()
 order_created_signal = Signal()
 order_additional_info = Signal()
 stock_changed_signal = Signal()
+# Emitted after a customer erasure (RODO/GDPR) so downstream modules can scrub
+# their own PII rows. Kwargs: email: str, order_ids: list[str].
+customer_anonymized_signal = Signal()

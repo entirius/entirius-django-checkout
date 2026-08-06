@@ -21,6 +21,7 @@ from django_checkout.api.v2.permissions import ChannelAPIKeyPermission
 from django_checkout.models import Order, OrderAttachment
 from django_checkout.schemas.responses.order import OrderCreateResponse, OrderListResponse
 from django_checkout.services import order_service
+from django_checkout.utils import redact_payment_secrets
 
 logger = logging.getLogger("checkout.v2.orders")
 
@@ -84,6 +85,11 @@ class OrderListView(CheckoutChannelMixin, APIView):
                 description="Sort field",
                 examples=[OpenApiExample(name="created_desc", value="-created")],
             ),
+            OpenApiParameter(
+                name="language",
+                description="Language for status and payment method labels (default: channel language)",
+                examples=[OpenApiExample(name="english", value="en")],
+            ),
         ],
         responses={200: OrderListResponse},
     )
@@ -120,6 +126,11 @@ class OrderDetailView(CheckoutChannelMixin, APIView):
     def get(self, request, pretty_id, **kwargs):
         channel = self.get_channel()
         customer = self.get_customer()
+        # SECURITY: customer=None matches every GUEST order, and pretty_id is sequential —
+        # without this an authenticated user holding no Customer row could enumerate them.
+        if customer is None:
+            return Response(status=status.HTTP_401_UNAUTHORIZED)
+
         try:
             order = Order.objects.get(
                 order_service.order_lookup_q(pretty_id),
@@ -137,7 +148,7 @@ class OrderDetailView(CheckoutChannelMixin, APIView):
                 "status": order.order_status,
                 "created": order.created.isoformat() if order.created else None,
                 "updated": order.updated.isoformat() if order.updated else None,
-                "order_body": order.order_body,
+                "order_body": redact_payment_secrets(order.order_body),
                 "attachments": attachments,
             }
         )
@@ -155,6 +166,10 @@ class OrderAttachmentView(CheckoutChannelMixin, APIView):
     def get(self, request, order_id, file_id, **kwargs):
         channel = self.get_channel()
         customer = self.get_customer()
+        # SECURITY: see OrderDetailView — customer=None would expose every guest invoice.
+        if customer is None:
+            return Response(status=status.HTTP_401_UNAUTHORIZED)
+
         try:
             order = Order.objects.get(order_service.order_lookup_q(order_id), channel=channel, customer=customer)
             attachment = OrderAttachment.objects.get(pk=file_id, order=order)

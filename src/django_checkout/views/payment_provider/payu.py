@@ -10,6 +10,11 @@ from django_utils.api.decorators import api_view, require_http_method
 from django_utils.api.responses import Response
 from process_logger import ProcessLogger
 
+from django_checkout.domain.payment_provider.payu_signature import (
+    SECOND_KEY_FIELD,
+    SIGNATURE_HEADER,
+    is_valid_notification,
+)
 from django_checkout.domain.reservation import release_stock_reservation
 from django_checkout.enums import OrderStatus, PaymentIntentStatus
 from django_checkout.models import Order, PaymentIntent
@@ -58,7 +63,28 @@ def payu_notify(request: WSGIRequest, *args, **kwargs):
         logger_process.add_log_param("is_status_changed", False)
         logger_process.error("There is no PaymentIntent object with given order ID from PayU")
         bev.finish_with_error(finish_tag="Can not find related PaymentIntent object", details=extra)
-        return Response(data={"message": "For more information see log"}, status="FAIL", status_code=200)
+        # Not 200: this is usually a race — the notification outran the commit that creates
+        # the PaymentIntent. PayU retries for 72h on any other code, so the confirmation
+        # lands once the row exists. Answering 200 consumed it permanently.
+        return Response(data={"message": "For more information see log"}, status="FAIL", status_code=503)
+
+    # Authenticity check, before anything is written. Until this passes, every field in
+    # `body` is attacker-controlled — including the status that marks an order paid.
+    method = payment_intent.method
+    second_key = (method.additional_data or {}).get(SECOND_KEY_FIELD) if method else None
+    if not is_valid_notification(request.body, request.headers.get(SIGNATURE_HEADER), second_key):
+        extra = {"payu_order_id": payu_order_id, "is_status_changed": False, "has_second_key": bool(second_key)}
+        logger_process.add_log_param("payu_order_id", payu_order_id)
+        logger_process.add_log_param("is_status_changed", False)
+        logger_process.error(
+            "PayU notification signature is invalid or unverifiable"
+            if second_key
+            else f"PayU PaymentMethod is missing '{SECOND_KEY_FIELD}' in additional_data — cannot verify notification"
+        )
+        bev.finish_with_error(finish_tag="PayU notification signature verification failed", details=extra)
+        # Not 200, deliberately: PayU retries for 72h, so a channel whose second_key is not
+        # configured yet gets a window to fix it instead of silently losing payments.
+        return Response(data={"message": "Invalid signature"}, status="FAIL", status_code=403)
 
     # Validation: do we have valid status field in response?
     if "status" not in body["order"]:

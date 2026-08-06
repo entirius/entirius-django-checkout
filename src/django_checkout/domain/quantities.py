@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from django.db.models import Case, IntegerField, Value, When
 from django_pim.models import ProductBundle
+from django_pim.services.bundle_data import get_option_titles
 from django_utils.api.responses import ErrorInfo
 
 from django_checkout.domain.bundle import bundle_data_factory
@@ -40,9 +41,13 @@ def _fetch_bundle_limits(sku_list: list) -> dict:
     return limits
 
 
-def check_which_bundle_is_not_saleable(sku_list, channel, items_data, customer: "Customer" = None):
+def check_which_bundle_is_not_saleable(
+    sku_list, channel, items_data, customer: "Customer" = None, language: str | None = None
+):
     bundles = bundle_data_factory(items_list=sku_list)
     bundle_limits = _fetch_bundle_limits(sku_list)
+    all_sub_skus = [sub_sku for subproducts in bundles.values() for sub_sku in subproducts.keys()]
+    option_titles = get_option_titles(channel.idx, all_sub_skus, language) if language and all_sub_skus else {}
     not_saleable_bundles = {}
     bundle_errors: list[ErrorInfo] = []
     items_dict = {}
@@ -168,7 +173,13 @@ def check_which_bundle_is_not_saleable(sku_list, channel, items_data, customer: 
             if bundle_qty != 0:
                 is_saleable.append(item["saleable_quantity"] >= item["quantity"] * bundle_qty)
                 saleable.append(item["saleable_quantity"] // item["quantity"])
-                bundle_items[bundle_sku].append(SkuQuantityData(sku=sku, quantity=item["quantity"] * bundle_qty))
+                bundle_items[bundle_sku].append(
+                    SkuQuantityData(
+                        sku=sku,
+                        quantity=item["quantity"] * bundle_qty,
+                        option_title=option_titles.get(sku),
+                    )
+                )
             else:
                 is_saleable.append(False)
                 saleable.append(0)

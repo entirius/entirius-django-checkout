@@ -18,7 +18,7 @@ from django_checkout.domain.shipping import get_delivery_matrix_prices
 from django_checkout.enums import CartStatus, ItemStatus
 from django_checkout.models.payment_method import PaymentMethod
 from django_checkout.models.shipping_option import ShippingOption
-from django_checkout.utils import anonymize_addresses_in_body, sanitize
+from django_checkout.utils import anonymize_addresses_in_body, sanitize, scrub_payment_secrets_in_body
 from django_checkout.worker.split_order.validator import check_that_order_can_be_split
 
 if TYPE_CHECKING:
@@ -426,7 +426,10 @@ class Cart(models.Model):
 
     def anonymize(self) -> bool:
         body = self.cart_body or {}
-        save = anonymize_addresses_in_body(body)
+        # both must run — `or` would short-circuit the second call
+        anonymized = anonymize_addresses_in_body(body)
+        scrubbed = scrub_payment_secrets_in_body(body)
+        save = anonymized or scrubbed
         if save:
             self.cart_body = sanitize(body)
             self.save()

@@ -17,6 +17,7 @@ from django_checkout.views.payment_provider.paypal import paypal_cancel, paypal_
 from django_checkout.views.payment_provider.payu import payu_notify
 from django_checkout.views.payment_provider.przelewy24 import przelewy24_notify
 from django_checkout.views.payment_provider.stripe import stripe_notify
+from django_checkout.views.payment_redirect import payment_redirect_bridge
 from django_checkout.views.shipping import get_shipping_methods_for_cart
 
 api_paths = [
@@ -39,6 +40,7 @@ api_paths = [
     path("notify/autopay/", autopay_return, name="autopay-return"),
     path("notify/przelewy24/", przelewy24_notify, name="przelewy24-notify"),
     path("notify/stripe/", stripe_notify, name="stripe-notify"),
+    path("redirect/<uuid:token>/", payment_redirect_bridge, name="payment-redirect-bridge"),
 ]
 
 admin_paths = [path("customer/delete", admin.admin_customer_delete, name="checkout-admin-customer-delete")]

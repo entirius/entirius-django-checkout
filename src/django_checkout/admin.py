@@ -35,6 +35,7 @@ from django_checkout.models import (
     OrderStatusLabel,
     PaymentIntent,
     PaymentMethod,
+    PaymentRedirect,
     ProductRepresentation,
     SaleOffer,
     SaleOfferPrice,
@@ -1206,6 +1207,22 @@ class PaymentIntentAdmin(admin.ModelAdmin):
         "redirect_url",
         "provider_notify",
     ]
+
+
+@admin.register(PaymentRedirect)
+class PaymentRedirectAdmin(admin.ModelAdmin):
+    model = PaymentRedirect
+    list_display = ["token", "order", "created_at", "expires_at", "consumed_at"]
+    list_filter = ["order__channel"]
+    search_fields = ["token", "order__order_id"]
+    fields = ["token", "order", "target_url", "created_at", "modified_at", "expires_at", "consumed_at"]
+    readonly_fields = ["token", "order", "target_url", "created_at", "modified_at", "expires_at", "consumed_at"]
+
+    def has_add_permission(self, request) -> bool:
+        return False
+
+    def has_change_permission(self, request, obj=None) -> bool:
+        return False
 
 
 @admin.register(Stock)

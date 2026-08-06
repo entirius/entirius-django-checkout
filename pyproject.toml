@@ -1,6 +1,6 @@
 [project]
 name = "entirius-django-checkout"
-version = "9.2.0"
+version = "9.3.0"
 description = "Checkout engine for Django: carts, orders, payment intents (PayU, PayPal, Autopay, Przelewy24, Paynow, Stripe), shipping, discounts and sale offers"
 authors = [{ name = "Entirius" }]
 maintainers = [
@@ -29,9 +29,9 @@ dependencies = [
     "pytz",
     "entirius-django-utils>=2.0.0",
     "entirius-django-regional>=2.0.0",
-    "entirius-django-pim>=3.0.0",
+    "entirius-django-pim>=3.1.0",
     "entirius-django-accounts>=5.0.0",
-    "entirius-django-pricemanager>=4.0.1",
+    "entirius-django-pricemanager>=4.1.0",
     "entirius-py-payu-sdk>=2.0.0",
     "entirius-py-paypal-sdk>=2.0.0",
     "entirius-py-autopay-sdk>=2.0.0",

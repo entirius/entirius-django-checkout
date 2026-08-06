@@ -29,7 +29,7 @@ from django_checkout.models.shipping_option import ShippingOption
 from django_checkout.models.stock import Stock
 from django_checkout.models.stock_reservation import StockReservation
 from django_checkout.signals import order_canceled_signal, order_confirmed_signal, order_created_signal
-from django_checkout.utils import anonymize_addresses_in_body, sanitize
+from django_checkout.utils import anonymize_addresses_in_body, sanitize, scrub_payment_secrets_in_body
 
 if TYPE_CHECKING:
     from django_accounts.models.customer import Customer
@@ -38,12 +38,9 @@ if TYPE_CHECKING:
     from django_checkout.models.channel import Channel
 
 
-def _is_voucher_method(method: Optional["PaymentMethod"], code: str) -> bool:
-    """Voucher discriminator: trust method.provider, fall back to the stored code
-    (method is SET_NULL and admins may name the method code differently)."""
-    if method is not None:
-        return method.provider == PaymentProvider.VOUCHER
-    return code == PaymentProvider.VOUCHER
+def _is_voucher_method(method: "PaymentMethod | None", code: str) -> bool:
+    """Voucher discriminator — delegates to the single source of truth on the enum."""
+    return PaymentProvider.is_voucher(method.provider if method is not None else None, code)
 
 
 def _intent_amount(is_voucher: bool, data) -> Decimal:
@@ -203,6 +200,9 @@ class Order(models.Model):
             with transaction.atomic():
                 is_cash_on_delivery = cart.selected_payment_method.is_cash_on_delivery
                 is_free_order = cart.selected_payment_method.is_free_order
+                voucher_applied = Decimal(str(getattr(data.cart, "voucher_amount_applied", None) or 0))
+                remaining_to_pay = Decimal(str(getattr(data, "total", None) or 0))
+                fully_voucher_covered = voucher_applied > 0 and remaining_to_pay <= 0
                 if is_cash_on_delivery or is_free_order:
                     order_status = OrderStatus.CONFIRMED
                 else:
@@ -346,6 +346,8 @@ class Order(models.Model):
                         is_voucher = _is_voucher_method(method, pm_data.code)
                         if is_voucher and voucher_intent is not None:
                             continue
+                        if not is_voucher and fully_voucher_covered:
+                            continue
                         intent = PaymentIntent(
                             order=order,
                             code=pm_data.code,
@@ -382,6 +384,8 @@ class Order(models.Model):
                     for method in selected_methods:
                         if method is None:
                             continue
+                        if fully_voucher_covered and not _is_voucher_method(method, method.code):
+                            continue
                         provider = method.get_provider()
                         provider.request = request
                         provider.process_order(order, original_cart)
@@ -410,6 +414,9 @@ class Order(models.Model):
                             redirect_url = provider_redirect
                         if provider.error:
                             payment_error = provider.error
+
+                if process_payment and fully_voucher_covered and payment_error is None:
+                    order.modify_status(OrderStatus.CONFIRMED)
 
                 return order, redirect_url, payment_error
 
@@ -461,7 +468,10 @@ class Order(models.Model):
         # Operate directly on raw order_body to be resilient to schema drift
         # (e.g. lanks in old orders).
         body = self.order_body or {}
-        save = anonymize_addresses_in_body(body)
+        # both must run — `or` would short-circuit the second call
+        anonymized = anonymize_addresses_in_body(body)
+        scrubbed = scrub_payment_secrets_in_body(body)
+        save = anonymized or scrubbed
         if save:
             self.order_body = sanitize(body)
             self.save()

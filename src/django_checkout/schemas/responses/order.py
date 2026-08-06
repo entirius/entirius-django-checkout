@@ -24,8 +24,21 @@ class OrderAttachmentResponse(BaseModel):
     name: str | None = Field(None, description="Attachment filename")
 
 
+class PaymentMethodSummary(BaseModel):
+    """One payment method used to settle an order.
+
+    An order can carry several — a voucher covering part of the total settles alongside
+    the gateway that covers the rest.
+    """
+
+    code: str = Field(description="Payment method code", examples=["banktransfer"])
+    name: str | None = Field(
+        None, description="Payment method name in the requested language", examples=["Bank Transfer"]
+    )
+
+
 class OrderListItemResponse(BaseModel):
-    """Slim order summary for GET orders/ list."""
+    """Slim order summary for GET orders/list/."""
 
     order_id: str = Field(description="Order UUID")
     pretty_id: str = Field(description="Human-readable order ID", examples=["0100001"])
@@ -36,11 +49,16 @@ class OrderListItemResponse(BaseModel):
 
     total_gross: str | None = Field(None, description="Order total gross", examples=["419.97"])
     total_net: str | None = Field(None, description="Order total net", examples=["341.44"])
+    total_tax: str | None = Field(None, description="Order total tax", examples=["78.53"])
     currency: str | None = Field(None, description="Currency code", examples=["EUR"])
+    country_code: str | None = Field(None, description="Order country code", examples=["DE"])
 
     item_count: int = Field(0, description="Number of line items")
     shipping_method_code: str | None = Field(None, description="Selected shipping method")
-    payment_method_code: str | None = Field(None, description="Selected payment method")
+    payment_methods: list[PaymentMethodSummary] = Field(
+        default_factory=list,
+        description="Payment methods that settled the order — several when a voucher is combined with a gateway",
+    )
 
     attachments: list[OrderAttachmentResponse] = Field(default_factory=list, description="Order attachments")
 

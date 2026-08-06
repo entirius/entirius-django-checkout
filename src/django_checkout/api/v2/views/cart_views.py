@@ -10,11 +10,13 @@ Every write operation returns full cart state (Decision #9).
 
 import logging
 
+from django.core.exceptions import ImproperlyConfigured
 from drf_spectacular.utils import OpenApiExample, OpenApiParameter, extend_schema
 from pydantic import ValidationError as PydanticValidationError
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.throttling import SimpleRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
@@ -34,6 +36,7 @@ from django_checkout.schemas.requests.cart import (
 from django_checkout.schemas.responses.cart import CartV2Response
 from django_checkout.services import cart_service
 from django_checkout.services.cart_response_builder import build_v2_cart_response, build_v2_cart_response_fresh
+from django_checkout.utils.api.throttling import client_ip
 from django_checkout.views.countries import _build_countries_response
 from django_checkout.views.gratis import _build_gratis_response
 from django_checkout.views.payment import _build_payment_methods_response
@@ -290,9 +293,39 @@ class CartPaymentMethodsView(CheckoutChannelMixin, APIView):
         return Response(_build_payment_methods_response(record))
 
 
+class _CartPaymentThrottle(SimpleRateThrottle):
+    """Throttle the payment PATCH by client IP (H6). This endpoint carries voucher
+    ``pay_code`` (code + PIN) into the voucher anti-brute-force counter, so it needs a
+    rate limit independent of the per-voucher lockout — and one that applies whether the
+    request is anonymous (channel key only) or JWT-authenticated (AnonRateThrottle would
+    skip authenticated callers). Override the rate via
+    DEFAULT_THROTTLE_RATES['checkout_cart_payment']."""
+
+    scope = "checkout_cart_payment"
+    # No class-level `rate`: SimpleRateThrottle.__init__ only calls get_rate() when the
+    # attribute is falsy, so setting it here would make the override below dead code and
+    # hard-wire the limit. The fallback lives in _FALLBACK_RATE instead.
+    _FALLBACK_RATE = "30/minute"
+
+    def get_cache_key(self, request, view):  # noqa: ANN001, ANN201
+        # Deliberately NOT self.get_ident(): DRF falls back to the raw X-Forwarded-For
+        # chain whenever NUM_PROXIES is unset (the default), and that header is
+        # client-supplied — rotate it per request and the counter never trips.
+        return self.cache_format % {"scope": self.scope, "ident": client_ip(request)}
+
+    def get_rate(self) -> str:
+        """Never return None or a malformed rate — in DRF that means "no throttling"."""
+        try:
+            rate = super().get_rate()
+        except ImproperlyConfigured:  # scope missing from DEFAULT_THROTTLE_RATES
+            return self._FALLBACK_RATE
+        return rate if rate and "/" in rate else self._FALLBACK_RATE
+
+
 class CartPaymentView(CheckoutChannelMixin, APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [ChannelAPIKeyPermission]
+    throttle_classes = [_CartPaymentThrottle]
 
     @extend_schema(
         summary="Select payment method",

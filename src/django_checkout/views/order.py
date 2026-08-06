@@ -7,11 +7,10 @@ import os
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
-from django.db.models import F, Q
+from django.db.models import F, Prefetch, Q
 from django.http import HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django_utils.api.decorators import (
-    api_view,
     authenticate,
     parse_body,
     parse_parameters,
@@ -29,15 +28,14 @@ from django_checkout.domain.validators.order import OrderValidation
 from django_checkout.enums import OrderStatus
 from django_checkout.models import (
     Cart,
-    Channel,
     DiscountCode,
-    Invoice,
     Order,
     OrderAttachment,
     OrderStatusLabel,
     ShippingIntent,
 )
 from django_checkout.settings import CHECKOUT_USE_ISO_DATETIME_FORMAT
+from django_checkout.utils import redact_payment_secrets
 from django_checkout.utils.api.decorators import channel_view
 from django_checkout.utils.api.utils import paginate, resolve_language
 from django_checkout.views.cart import prepare_errors_and_messages
@@ -47,6 +45,20 @@ from django_checkout.worker.split_order.validator import check_that_order_can_be
 from ..bi import Checkout_OrderCreationEvent
 
 logger_process = ProcessLogger("CHECKOUT_CART")
+
+
+def _with_related(orders):
+    """Attach everything order_to_repr reads off an order.
+
+    Without this a page costs four extra queries per order (attachments, shipping intent,
+    invoices, and the attachment's order+customer). OrderAttachment.get_download_url walks
+    order -> customer, which is why the prefetch carries its own select_related.
+    """
+    return orders.select_related("channel", "customer").prefetch_related(
+        Prefetch("orderattachment_set", queryset=OrderAttachment.objects.select_related("order__customer")),
+        Prefetch("shipping_items", queryset=ShippingIntent.objects.select_related("method")),
+        "invoice",
+    )
 
 
 @csrf_exempt
@@ -209,26 +221,27 @@ def order_view(request, *args, **kwargs):
     @require_http_method("GET")
     @require_authentication
     def get(request, *args, **kwargs):
+        # Resolved once per request, not once per order: every lookup below is keyed by
+        # channel or by method code, so a page of orders shares the same three queries.
+        language = resolve_language(request.channel, request.GET)
+        method_names = Order.objects.localized_method_names(request.channel, language)
+        status_labels = {
+            label.status: (label.name_t9n or {}).get(language)
+            for label in OrderStatusLabel.objects.filter(channel=request.channel)
+        }
+
         def order_to_repr(order):
-            order_body = order.order_body
-            status_label = None
+            # Redact before anything else. redact_payment_secrets deep-copies, so the
+            # mutations below land on the copy — order.order_body used to be a live
+            # reference that every GET edited in place.
+            order_body = redact_payment_secrets(order.order_body)
+            status_label = status_labels.get(order.order_status)
+            attachments = order.orderattachment_set.all()
 
-            try:
-                status_label_obj = OrderStatusLabel.objects.get(status=order.order_status, channel=request.channel)
-                available_status_label_languages = status_label_obj.name_t9n if status_label_obj.name_t9n else {}
-                if (
-                    hasattr(status_label_obj, "name_t9n")
-                    and resolve_language(request.channel, request.GET) in available_status_label_languages
-                ):
-                    status_label = available_status_label_languages.get(resolve_language(request.channel, request.GET))
-            except Exception as e:
-                logger_process.exception(
-                    f"Exception - {e}, maybe add missing status labels to Django_Checkout Order status label: {order.order_status}"
-                )
-            attachments = OrderAttachment.objects.filter(order=order)
-
-            try:
-                shipping_intent_obj = ShippingIntent.objects.get(order=order)
+            shipping_intent_obj = next(iter(order.shipping_items.all()), None)
+            if shipping_intent_obj is None:
+                shipping_intent = None
+            else:
                 shipping_intent = {
                     "method_code": (
                         shipping_intent_obj.method.code if shipping_intent_obj.method else shipping_intent_obj.code
@@ -236,10 +249,8 @@ def order_view(request, *args, **kwargs):
                     "tracking_number": shipping_intent_obj.tracking_number,
                     "tracking_link": shipping_intent_obj.tracking_link,
                 }
-            except ObjectDoesNotExist:
-                shipping_intent = None
 
-            invoices_obj = Invoice.objects.filter(order=order)
+            invoices_obj = order.invoice.all()
             invoices = []
             for invoice in invoices_obj:
                 invoices.append(
@@ -273,9 +284,11 @@ def order_view(request, *args, **kwargs):
                     else order.updated.strftime("%Y-%m-%d %H:%M")
                 ),
             }
-            updated_order_body = Order.objects.update_shipping_and_payment_method_name(request, order, order_body)
+            updated_order_body = Order.objects.update_shipping_and_payment_method_name(
+                order_body, method_names=method_names
+            )
             updated_order_body.update(order_info)
-            return order_body
+            return updated_order_body
 
         @parse_parameters(OrderParams.Schema())
         def get_list(request, params: OrderParams, *args, **kwargs):
@@ -333,12 +346,13 @@ def order_view(request, *args, **kwargs):
                         available_for_return.append(order.pk)
                 orders = orders.filter(pk__in=available_for_return)
 
-            pagination, paginated_data = paginate(request.GET, orders)
+            pagination, paginated_data = paginate(request.GET, _with_related(orders))
             res_data = [order_to_repr(order) for order in paginated_data]
             return PaginatedResponse(pagination, res_data)
 
         def get_record(request, uid=None, *args, **kwargs):
-            order: Order = Order.objects.filter(channel=request.channel, pretty_id_snap=uid).first()
+            orders = _with_related(Order.objects.filter(channel=request.channel, pretty_id_snap=uid))
+            order: Order = orders.first()
             if order is None:
                 raise NotFound
             else:
@@ -363,17 +377,20 @@ def order_view(request, *args, **kwargs):
 
 
 @csrf_exempt
-@api_view
+@channel_view
 @require_http_method("GET")
+@authenticate
+@require_authentication
 def get_order_attachment(request, channel_idx=None, order_id=None, file_id=None, uid=None, *args, **kwargs):
-    channel = Channel.objects.filter(idx=channel_idx).first()
-
+    # `uid` stays in the URL for link compatibility but is NOT the authorization: a path
+    # segment is a secret in a URL, and URLs leak through Referer, proxy logs and history.
+    # Ownership is decided against the authenticated caller, like the v2 endpoint does.
     try:
-        order = Order.objects.get(channel=channel, order_id=order_id)
+        order = Order.objects.get(channel=request.channel, order_id=order_id)
     except ObjectDoesNotExist as e:
         raise NotFound(message=str(e), status="order_doesnt_exists")
 
-    if str(order.customer.uid) != str(uid):
+    if order.customer is None or order.customer != request.user.customer:
         e = "Order doesnt belong to user."
         raise Forbidden(message=e, status="order_and_user_unmatched")
 

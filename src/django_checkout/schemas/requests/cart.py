@@ -2,7 +2,13 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+# Opaque to checkout, but persisted verbatim into cart_body/order_body and echoed on
+# every GET — bound it so an anonymous caller can't write an unbounded blob.
+_VOUCHER_GIFT_MAX_KEYS = 12
+_VOUCHER_GIFT_MAX_VALUE_LEN = 512
+_VOUCHER_GIFT_MAX_TOTAL_LEN = 2048
 
 
 class ItemInput(BaseModel):
@@ -10,6 +16,33 @@ class ItemInput(BaseModel):
     quantity: int = Field(ge=0, description="Quantity", examples=[2])
     offer_price: float | None = Field(None, description="Per-item price override (optional)")
     extra: dict | None = Field(None, description="Custom product options (optional)")
+    voucher_gift: dict | None = Field(
+        None, description="Gift-card personalization + design choice (opaque here; the voucher module validates it)"
+    )
+
+    @field_validator("voucher_gift")
+    @classmethod
+    def _bound_voucher_gift(cls, value: dict | None) -> dict | None:
+        """Reject oversized / nested / key-flooded gift blobs (opaque but bounded)."""
+        if value is None:
+            return None
+        if len(value) > _VOUCHER_GIFT_MAX_KEYS:
+            raise ValueError(f"voucher_gift accepts at most {_VOUCHER_GIFT_MAX_KEYS} keys")
+        total = 0
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ValueError("voucher_gift keys must be strings")
+            if item is None:
+                continue
+            if isinstance(item, (dict, list)):
+                raise ValueError("voucher_gift values must be scalars (no nesting)")
+            text = str(item)
+            if len(text) > _VOUCHER_GIFT_MAX_VALUE_LEN:
+                raise ValueError(f"voucher_gift['{key}'] exceeds {_VOUCHER_GIFT_MAX_VALUE_LEN} chars")
+            total += len(key) + len(text)
+        if total > _VOUCHER_GIFT_MAX_TOTAL_LEN:
+            raise ValueError(f"voucher_gift exceeds {_VOUCHER_GIFT_MAX_TOTAL_LEN} chars total")
+        return value
 
 
 class AddressInput(BaseModel):
@@ -97,6 +130,7 @@ class PaymentPatchRequest(BaseModel):
     save_card: bool = Field(False, description="Save card for future use")
     pay_code: str | None = Field(
         None,
+        max_length=256,
         description="Voucher code(s) to apply via this payment method, format 'CODE:PIN,CODE2' (PIN optional per code).",
         examples=["26WT1234:1234"],
     )

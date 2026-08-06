@@ -9,33 +9,56 @@ from django.db import models
 from django.db.models import Q
 
 from django_checkout import settings
-from django_checkout.utils.api.utils import resolve_language
+from django_checkout.utils import payment_entries
+
+
+def _set_localized_name(entry: dict, names_by_code: dict) -> None:
+    name = names_by_code.get(entry.get("code"))
+    if name is not None:
+        entry["name"] = name
 
 
 class OrderManager(models.Manager):
     @staticmethod
-    def update_shipping_and_payment_method_name(request, order, order_body):
-        language = resolve_language(request.channel, request.GET)
-        if order.selected_shipping_method is not None:
-            name_shipping = order.selected_shipping_method.method.name_t9n.get(language, None)
-            if name_shipping is not None:
-                order_body["shipping_method"]["name"] = name_shipping
-        # payment_method became a list with the multi-method (voucher) refactor; tolerate
-        # the legacy single-dict shape and set each entry's localized name from its matching
-        # PaymentMethod (by code), falling back to the order's first selected method.
-        payment_method = order_body.get("payment_method")
-        if isinstance(payment_method, dict):  # legacy single-object orders
-            payment_method = [payment_method]
-        if isinstance(payment_method, list):
-            methods_by_code = {m.code: m for m in order.selected_payment_methods}
-            for entry in payment_method:
-                if not isinstance(entry, dict):
-                    continue
-                method = methods_by_code.get(entry.get("code")) or order.selected_payment_method
-                if method is not None:
-                    name_payment = method.name_t9n.get(language, None)
-                    if name_payment is not None:
-                        entry["name"] = name_payment
+    def localized_method_names(channel, language) -> tuple[dict, dict]:
+        """Localized shipping and payment method names, keyed by code, for one channel.
+
+        Two queries for a whole page of orders. Resolving the shipping name per order used
+        to go through ``Order.selected_shipping_method``, which runs the full ShippingOption
+        availability chain (country, currency, stock, volume, matrix prices) only to read
+        ``ShippingMethod.name_t9n`` off the end of it.
+        """
+        # Local: models/order.py imports this manager before it imports PaymentMethod, and
+        # payment_method pulls in domain.payment_provider, which reaches back into models.
+        from django_checkout.models.payment_method import PaymentMethod
+        from django_checkout.models.shipping_method import ShippingMethod
+
+        def names(model):
+            return {m.code: (m.name_t9n or {}).get(language) for m in model.objects.filter(channel=channel)}
+
+        return names(ShippingMethod), names(PaymentMethod)
+
+    @staticmethod
+    def update_shipping_and_payment_method_name(order_body, *, method_names):
+        """Overwrite the method names stored in order_body with their localized versions.
+
+        ``method_names`` is the ``localized_method_names`` pair, hoisted out of the caller's
+        loop so the two lookups are not repeated for every order on a page. Required and
+        keyword-only on purpose: the old signature was ``(request, order, order_body)``, and
+        a stale caller must fail with a TypeError rather than silently bind ``order_body``
+        to the wrong parameter.
+
+        A code with no matching method row keeps the name persisted at order time.
+        """
+        shipping_names, payment_names = method_names
+
+        shipping_method = order_body.get("shipping_method")
+        if isinstance(shipping_method, dict):
+            _set_localized_name(shipping_method, shipping_names)
+        # payment_method became a list with the multi-method (voucher) refactor;
+        # payment_entries tolerates both shapes and hands back live references.
+        for entry in payment_entries(order_body):
+            _set_localized_name(entry, payment_names)
         return order_body
 
     def have_previous_order_by_email(self, channel, customer_email):

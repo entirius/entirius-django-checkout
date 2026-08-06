@@ -51,6 +51,7 @@ def create_cart(
                 offer_price=item_dict.get("offer_price"),
                 extra=item_dict.get("extra"),
                 sub_items=None,
+                voucher_gift=item_dict.get("voucher_gift"),
             )
         )
 
@@ -143,6 +144,7 @@ def _build_items_from_list(raw_items: list | None) -> list:
                 offer_price=Decimal(str(raw["offer_price"])) if raw.get("offer_price") else None,
                 extra=raw.get("extra"),
                 sub_items=None,
+                voucher_gift=raw.get("voucher_gift"),
             )
         )
     return items
@@ -334,6 +336,7 @@ def patch_items(
                 offer_price=item_dict.get("offer_price"),
                 extra=item_dict.get("extra"),
                 sub_items=None,
+                voucher_gift=item_dict.get("voucher_gift"),
             )
         )
     if checkout_data.cart and checkout_data.cart.discounts:
@@ -484,9 +487,24 @@ def merge_carts(
 
     unique_skus = reduce(lambda res, tpl: dict(res, **{tpl[0]: res.get(tpl[0], 0) + tpl[1]}), merged, {})
 
+    # Preserve per-line payloads (extra, voucher_gift) across the merge, else a guest's
+    # gift personalization is lost on login. Guest items come last, so guest wins.
+    payloads: dict[str, tuple[dict | None, dict | None]] = {}
+    ordered = list(checkout_data_customer.cart.items or []) + list(checkout_data_guest.cart.items or [])
+    if operation == "override":
+        ordered = list(checkout_data_guest.cart.items or [])
+    for item in ordered:
+        prev_extra, prev_gift = payloads.get(item.sku, (None, None))
+        extra = getattr(item, "extra", None)
+        gift = getattr(item, "voucher_gift", None)
+        payloads[item.sku] = (extra if extra is not None else prev_extra, gift if gift is not None else prev_gift)
+
     body = CartRequest.factory()
     for sku, qty in unique_skus.items():
-        body.cart.items.append(ItemData(sku=sku, quantity=qty, offer_price=None, extra=None, sub_items=None))
+        extra, gift = payloads.get(sku, (None, None))
+        body.cart.items.append(
+            ItemData(sku=sku, quantity=qty, offer_price=None, extra=extra, sub_items=None, voucher_gift=gift)
+        )
 
     processed_data, messages = process_cart(
         channel, body, checkout_data_customer, customer=customer, geo_country=geo_country
