@@ -19,11 +19,34 @@ from django_checkout.domain.dto.cart import (
     ValidationStatus,
 )
 from django_checkout.domain.validators.order import OrderValidation
-from django_checkout.enums import CartStatus, SplitOrderPaymentFeeMechanism, SplitOrderShippingCostMechanism
+from django_checkout.enums import (
+    CartStatus,
+    PaymentProvider,
+    SplitOrderPaymentFeeMechanism,
+    SplitOrderShippingCostMechanism,
+)
 from django_checkout.models import Cart, Channel, Order, SplitOrderMechanism
 from django_checkout.models.splited_order_link import SplitOrderLink
 
 logger_process = ProcessLogger("SPLIT_ORDER")
+
+
+def _settling_payment_method(payment_methods):
+    """Return the payment method that settles a split part.
+
+    ``payment_method`` is a list — a cart may carry a voucher next to a gateway method —
+    while a split part is created against a single method, so the list has to be resolved
+    to one entry before ``asdict()`` sees it (``asdict()`` on the list itself raises
+    ``TypeError: asdict() should be called on dataclass instances``).
+
+    """
+    methods = [method for method in (payment_methods or []) if method is not None]
+    if not methods:
+        return None
+    for method in methods:
+        if not PaymentProvider.is_voucher(getattr(method, "provider", None), getattr(method, "code", None)):
+            return method
+    return methods[0]
 
 
 def divide_number(number, parts):
@@ -190,7 +213,10 @@ def split_orders_by_attribute(
             channel=channel,
         )
         split_order_link.save()
-        pm_data = {k: v for k, v in asdict(cart_as_data.payment_method).items() if k in PaymentData.Schema().fields}
+        payment_method = _settling_payment_method(cart_as_data.payment_method)
+        if payment_method is None:
+            raise BadRequest("Cannot split an order without a payment method.")
+        pm_data = {k: v for k, v in asdict(payment_method).items() if k in PaymentData.Schema().fields}
         sm_data = {k: v for k, v in asdict(cart_as_data.shipping_method).items() if k in ShippingData.Schema().fields}
         body = CartRequest(
             cart=None,

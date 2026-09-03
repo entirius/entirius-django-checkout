@@ -789,6 +789,7 @@ def validate_cart_data(
                     channel=channel,
                     discount_idx=idx,
                     currency_code=currency,
+                    customer=customer,
                 )
 
                 if not gratis:
@@ -849,6 +850,7 @@ def validate_cart_data(
             msg=msg,
             channel=channel,
             currency=currency,
+            customer=customer,
         )
         if _reeval_items:
             validated_items = _reeval_items

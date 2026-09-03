@@ -12,6 +12,7 @@ from django_checkout.domain.dto.cart import CartData
 from django_checkout.domain.dto.discount import DiscountData, GratisRules
 from django_checkout.domain.dto.discount_items import DiscountItems
 from django_checkout.domain.dto.item import GratisData, ValidatedItemData
+from django_checkout.domain.quantities import filter_saleable_skus
 from django_checkout.domain.validators.discounts import validate_discounts
 from django_checkout.enums import ItemStatus
 from django_checkout.models import (
@@ -954,7 +955,7 @@ def calculate_discounts_modifiers(
 
 
 def calculate_and_valid_gratis(
-    discount: DiscountRuleCode, cart_data: CartData, channel=None, discount_idx=0, currency_code=None
+    discount: DiscountRuleCode, cart_data: CartData, channel=None, discount_idx=0, currency_code=None, customer=None
 ):
     """Zwraca gratis, jeżeli koszyk się kwalifikuje na podany sku i jego podaną ilość w koszyku"""
     gratis_is_allowed = False
@@ -999,6 +1000,9 @@ def calculate_and_valid_gratis(
     skus_allowed_to_gratis = products_allowed_to_gratis.values_list("real_product__sku", flat=True)
     picked_sku = cart_data.discounts[discount_idx].sku
     picked_quantity = cart_data.discounts[discount_idx].quantity
+    if picked_sku and not filter_saleable_skus([picked_sku], channel, customer):
+        cart_data.discounts[discount_idx].status = ItemStatus.INVALID
+        return None
     if discount.modifier == ModifiersForDiscountRule.GRATIS_BY_SKU_IN_CART:
         gratis_is_allowed = check_is_gratis_allowed(cart_data, discount)
     match discount.modifier:
@@ -1273,7 +1277,9 @@ def get_all_available_gratis_rules(
 
                 if should_show_gratis:
                     products_egible_to_gratis = filter_by_inclusion_and_exclusion(gratis, cart_body, channel)
-                    skus_egible_to_gratis = products_egible_to_gratis.values_list("real_product__sku", flat=True)
+                    skus_egible_to_gratis = filter_saleable_skus(
+                        products_egible_to_gratis.values_list("real_product__sku", flat=True), channel, customer
+                    )
                     if GRATIS_MECHANISM == 2:
                         sku_list_with_price = dict.fromkeys(skus_egible_to_gratis, GRATIS_PRICE)
                     else:
