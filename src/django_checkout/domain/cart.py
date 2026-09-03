@@ -132,11 +132,12 @@ def process_cart(
     # Provider-specific cart attachment (e.g. voucher pay_code → CartVoucher rows).
     # Runs once per validate cycle, after payment_method validation succeeds.
     # Replaces previous Phase-1 side-effect in validate_vouchers_signal handler.
+    voucher_attach_errors: list = []
     if cart is not None and payment_methods:
         raw_payment_inputs = data.payment_method if data.payment_method else checkout_data.payment_method
         for pm in payment_methods:
-            attach_errors = pm.get_provider().attach_to_cart(cart, payment_data=raw_payment_inputs)
-            messages.extend(attach_errors)
+            voucher_attach_errors.extend(pm.get_provider().attach_to_cart(cart, payment_data=raw_payment_inputs))
+        messages.extend(voucher_attach_errors)
     validated_cart_data, msg, cart_weight, validated_addresses = validate_cart_data(
         data,
         channel,
@@ -348,20 +349,28 @@ def process_cart(
         if not non_voucher_pm and remaining_to_pay > Decimal("0"):
             voucher_coverage_insufficient = True
             cart_total_before_voucher = voucher_paid + remaining_to_pay
+            rejections = [
+                {"code": e.code, "message": e.message} for e in voucher_attach_errors if isinstance(e, ErrorInfo)
+            ]
+            message = (
+                f"Voucher covers {voucher_paid} {currency} of {cart_total_before_voucher} {currency}. "
+                f"Add another payment method or another voucher to cover the remaining {remaining_to_pay} {currency}."
+            )
+            extra = {
+                "voucher_amount_applied": str(voucher_paid),
+                "cart_total": str(cart_total_before_voucher),
+                "remaining_to_pay": str(remaining_to_pay),
+                "currency_code": currency,
+            }
+            if rejections:
+                message = "No voucher could be applied: " + "; ".join(r["message"] for r in rejections)
+                extra["voucher_errors"] = rejections
             messages.append(
                 ErrorInfo(
                     code="voucher_insufficient_balance",
-                    message=(
-                        f"Voucher covers {voucher_paid} {currency} of {cart_total_before_voucher} {currency}. "
-                        f"Add another payment method or another voucher to cover the remaining {remaining_to_pay} {currency}."
-                    ),
+                    message=message,
                     affected_field="cart.payment_method",
-                    extra={
-                        "voucher_amount_applied": str(voucher_paid),
-                        "cart_total": str(cart_total_before_voucher),
-                        "remaining_to_pay": str(remaining_to_pay),
-                        "currency_code": currency,
-                    },
+                    extra=extra,
                 )
             )
         elif non_voucher_pm and voucher_paid > Decimal("0") and remaining_to_pay <= Decimal("0"):
