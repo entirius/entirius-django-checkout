@@ -7,18 +7,11 @@ from functools import wraps
 from django_utils.api.decorators import api_view
 from django_utils.api.exceptions import BadRequest, NotFound, Unauthorized
 
-from django_checkout.models import APIAdminKey, APIKey, Channel
+from django_checkout.models import Channel
+from django_checkout.utils.api_keys import ERASE_SCOPE, STOREFRONT_SCOPE, key_is_valid
 
 
 def channel_view(view):
-    def is_allowed(request):
-        key = request.headers.get("X-API-KEY")
-        channel = request.channel
-
-        query = APIKey.objects.filter(key=key, channel=channel)
-
-        return query.exists()
-
     @wraps(view)
     @api_view
     def _wrapped(request, channel_idx=None, *args, **kwargs):
@@ -26,7 +19,7 @@ def channel_view(view):
         request.channel = channel
 
         if channel is not None:
-            passed = is_allowed(request)
+            passed = key_is_valid(request, scope=STOREFRONT_SCOPE, channel_idx=channel_idx)
             if passed:
                 response = view(request, channel_idx=channel_idx, *args, **kwargs)
                 return response
@@ -39,14 +32,6 @@ def channel_view(view):
 
 
 def admin_view(view):
-    def is_allowed(request):
-        key = request.headers.get("X-API-ADMIN-KEY")
-        channel = request.channel
-
-        query = APIAdminKey.objects.filter(key=key, channel=channel)
-
-        return query.exists()
-
     @wraps(view)
     @api_view
     def _wrapped(request, channel_idx=None, *args, **kwargs):
@@ -54,7 +39,7 @@ def admin_view(view):
         request.channel = channel
 
         if channel is not None:
-            passed = is_allowed(request)
+            passed = key_is_valid(request, scope=ERASE_SCOPE, channel_idx=channel_idx)
             if passed:
                 response = view(request, channel_idx=channel_idx, *args, **kwargs)
                 return response
