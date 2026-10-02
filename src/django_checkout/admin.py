@@ -55,6 +55,7 @@ from django_checkout.models.limited_products import LimitedProducts
 from django_checkout.models.stock import Stock
 from django_checkout.models.stock_reservation import StockReservation
 from django_checkout.signals import order_additional_info
+from django_checkout.utils.api_keys import access_installed, mask_key
 from django_checkout.worker.export_discount_rules import export_discount_rules_to_csv
 from django_checkout.worker.import_discount_codes import DiscountCodeImportService
 from django_checkout.worker.import_discount_rules import import_discount_rules_from_csv
@@ -64,18 +65,33 @@ logger = logging.getLogger("process")
 logger = logging.getLogger("process")
 
 
-@admin.register(APIKey)
-class APIKeyAdmin(admin.ModelAdmin):
-    model = APIKey
-    list_display = ["channel", "key"]
+class LegacyKeyAdmin(admin.ModelAdmin):
+    """Keys show only their last four characters; with django_access installed they are read-only (tokens rule)."""
+
+    list_display = ["channel", "masked_key"]
     list_filter = ("channel",)
+    exclude = ("key",)
+    readonly_fields = ("masked_key",)
+
+    @admin.display(description="key")
+    def masked_key(self, obj) -> str:
+        return mask_key(obj.key)
+
+    def has_add_permission(self, request) -> bool:
+        return not access_installed() and super().has_add_permission(request)
+
+    def has_change_permission(self, request, obj=None) -> bool:
+        return not access_installed() and super().has_change_permission(request, obj)
+
+
+@admin.register(APIKey)
+class APIKeyAdmin(LegacyKeyAdmin):
+    model = APIKey
 
 
 @admin.register(APIAdminKey)
-class APIAdminKeyAdmin(admin.ModelAdmin):
+class APIAdminKeyAdmin(LegacyKeyAdmin):
     model = APIAdminKey
-    list_display = ["channel", "key"]
-    list_filter = ("channel",)
 
 
 @admin.register(Item)
