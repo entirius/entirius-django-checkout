@@ -192,13 +192,16 @@ Tests need PostgreSQL (default `postgresql://postgres:postgres@localhost:5432/te
 - `tax_rate` is integer `23` in v1 domain, decimal string `"0.23"` in v2 response.
 - Discount modifier types: 15 variants including stepped, gratis, percentage, fixed.
 - Order splitting creates multiple orders from one cart based on feature/attribute rules.
+- Keys: `utils/api_keys.py` `key_is_valid` is the one check (v1 decorators, v2 permission). With
+  `django_access` installed it calls `verify_api_key` (scopes `checkout.storefront` / `checkout.erase`) and never
+  reads `APIKey` / `APIAdminKey`; legacy keys work only as imported tokens. Soft dependency — never in `pyproject.toml`.
 
 ## Management commands
 
 | Command | Description |
 |---------|-------------|
-| `generate-api-key` | Generate APIKey for channel |
-| `generate-api-admin-key` | Generate admin APIKey |
+| `generate-api-key` | Generate APIKey for channel (refuses when django-access is installed) |
+| `generate-api-admin-key` | Generate admin APIKey (refuses when django-access is installed) |
 | `import-discount-rules` | Bulk import discount rules |
 | `export-discount-rules` | Export discount rules |
 | `import-limit-for-products` | Import product shipping/payment limitations |
