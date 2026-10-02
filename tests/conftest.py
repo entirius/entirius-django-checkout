@@ -2,11 +2,16 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+import secrets
+
 import pytest
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 
 User = get_user_model()
+
+STOREFRONT_SCOPE = "checkout.storefront"
+ERASE_SCOPE = "checkout.erase"
 
 
 @pytest.fixture
@@ -124,3 +129,22 @@ def auth_customer_client(api_client, api_key, regular_user):
     api_client.credentials(HTTP_X_API_KEY=api_key.key)
     api_client.force_authenticate(user=regular_user)
     return api_client
+
+
+@pytest.fixture
+def make_api_key(db):
+    """Create a key the module accepts today and return its raw value.
+
+    ``scope`` picks the table: ``ERASE_SCOPE`` → ``APIAdminKey`` (X-API-ADMIN-KEY), anything else → ``APIKey``
+    (X-API-KEY). The key contract tests go through this helper only, so moving the checks onto another key store
+    changes this function, never the assertions. Values are random and never printed.
+    """
+    from django_checkout.models import APIAdminKey, APIKey
+
+    def make_api_key(channel=None, scope: str | None = None) -> str:
+        model = APIAdminKey if scope == ERASE_SCOPE else APIKey
+        raw = secrets.token_hex(32)
+        model.objects.create(channel=channel, key=raw)
+        return raw
+
+    return make_api_key
