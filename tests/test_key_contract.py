@@ -20,7 +20,6 @@ from rest_framework.test import APIRequestFactory
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from django_checkout.api.v2.views.cart_views import CountriesView
-from django_checkout.services import cart_service
 from django_checkout.views.admin.customer import admin_customer_delete
 from django_checkout.views.cart import get_or_put_cart
 from django_checkout.views.countries import listing_view
@@ -29,33 +28,11 @@ from tests.conftest import ERASE_SCOPE
 factory = APIRequestFactory()
 
 
-@pytest.fixture
-def other_channel(channel):
-    from django_checkout.models import Channel
-
-    return Channel.objects.create(
-        idx="other-channel",
-        label="Other Channel",
-        min_order_price=0,
-        default_language=channel.default_language,
-        default_currency=channel.default_currency,
-        default_country=channel.default_country,
-    )
-
-
 @pytest.fixture(autouse=True)
 def _live_keys(channel, make_api_key):
     """Valid keys exist in every test, so a refusal proves the lookup, not an empty key store."""
     make_api_key(channel=channel)
     make_api_key(channel=channel, scope=ERASE_SCOPE)
-
-
-@pytest.fixture
-def cart(channel):
-    record, _ = cart_service.create_cart(
-        channel=channel, items=[], currency_code="EUR", language_code="en", country_code="PL"
-    )
-    return record
 
 
 @pytest.fixture

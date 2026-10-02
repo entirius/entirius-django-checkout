@@ -266,6 +266,7 @@ class TestAccessAndPaging:
     def test_query_count_does_not_grow_with_the_page(self, api_key, regular_user, customer, channel, transfer_method):
         """Guards the bulk name lookup — resolving names per order would be an N+1."""
         _order(channel, customer, _body([VOUCHER_PM, TRANSFER_PM]))
+        _list(api_key, regular_user, channel)  # warm-up: an access token's first use records last_used_at
         with CaptureQueriesContext(connection) as one_order:
             _list(api_key, regular_user, channel)
 
