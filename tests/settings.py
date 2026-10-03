@@ -2,6 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+import os
 from importlib.util import find_spec
 
 import dj_database_url
@@ -45,9 +46,17 @@ INSTALLED_APPS = [
     "django_pricemanager",
     "django_checkout",
 ]
-# Soft dependency: with django-access importable (zeno) keys are checked as access tokens.
-if find_spec("django_access"):
+# Soft dependency: with django-access importable (zeno) keys are checked as access tokens;
+# ENTIRIUS_TEST_NO_ACCESS=1 (make test-legacy) runs the legacy key path.
+if find_spec("django_access") and not os.environ.get("ENTIRIUS_TEST_NO_ACCESS"):
     INSTALLED_APPS.append("django_access")
+
+MIDDLEWARE = [
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+]
+ROOT_URLCONF = "tests.admin_urls"
 
 TEMPLATES = [
     {

@@ -66,7 +66,11 @@ logger = logging.getLogger("process")
 
 
 class LegacyKeyAdmin(admin.ModelAdmin):
-    """Keys show only their last four characters; with django_access installed they are read-only (tokens rule)."""
+    """Keys show only their last four characters; with django_access installed they are read-only (tokens rule).
+
+    Without django_access, keys come only from the ``generate-api-key`` / ``generate-api-admin-key`` commands: a key
+    added here is never shown in full, so it could not be read back.
+    """
 
     list_display = ["channel", "masked_key"]
     list_filter = ("channel",)
@@ -82,6 +86,9 @@ class LegacyKeyAdmin(admin.ModelAdmin):
 
     def has_change_permission(self, request, obj=None) -> bool:
         return not access_installed() and super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None) -> bool:
+        return not access_installed() and super().has_delete_permission(request, obj)
 
 
 @admin.register(APIKey)

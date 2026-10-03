@@ -8,6 +8,7 @@ Legacy keys reach it only through the import (``make_api_key``); the legacy tabl
 """
 
 import json
+import os
 import secrets
 from datetime import timedelta
 from importlib import import_module
@@ -16,6 +17,8 @@ from unittest.mock import patch
 import pytest
 
 pytest.importorskip("django_access")
+if os.environ.get("ENTIRIUS_TEST_NO_ACCESS"):  # make test-legacy: django_access is importable but not installed
+    pytest.skip("access path only", allow_module_level=True)
 
 from django.contrib import admin  # noqa: E402
 from django.core.management import CommandError, call_command  # noqa: E402
@@ -36,6 +39,7 @@ from tests.conftest import ERASE_SCOPE, STOREFRONT_SCOPE  # noqa: E402
 CHANNEL = "test-channel"
 OTHER = "other-channel"
 API_KEY, ADMIN_KEY = "HTTP_X_API_KEY", "HTTP_X_API_ADMIN_KEY"
+REFUSED = {"v1": 400, "v2": 401, "erase": 401}  # the status every refusal gets, per route
 SYSTEM = Actor()
 factory = APIRequestFactory()
 
@@ -85,6 +89,15 @@ def routes(cart):
     }
 
 
+def _cart_of(channel):
+    from django_checkout.services import cart_service
+
+    record, _ = cart_service.create_cart(
+        channel=channel, items=[], currency_code="EUR", language_code="en", country_code="PL"
+    )
+    return record
+
+
 def _other(scope: str) -> str:
     return ERASE_SCOPE if scope == STOREFRONT_SCOPE else STOREFRONT_SCOPE
 
@@ -101,7 +114,10 @@ class TestTokenLifecycle:
         token, raw = issue(scope, CHANNEL)
         assert call(raw).status_code == 200
         revoke_token(token, actor=SYSTEM)
-        assert call(raw).status_code in (400, 401)
+        revoked = _outcome(call(raw))
+        assert revoked[0] == REFUSED[name]
+        assert revoked == _outcome(call(secrets.token_hex(32)))
+        assert revoked == _outcome(call(""))
 
     def test_legacy_token_without_expiry_keeps_working(self, channel, make_api_key):
         raw = make_api_key(channel=channel)
@@ -140,7 +156,9 @@ class TestScopeAndChannel:
     def test_unpinned_token_works_on_any_channel(self, channel, other_channel, issue):
         _, storefront = issue(STOREFRONT_SCOPE)
         _, erase = issue(ERASE_SCOPE)
-        for idx in (CHANNEL, OTHER):
+        for record in (channel, other_channel):
+            idx, cart = record.idx, _cart_of(record)
+            assert _v1(cart, storefront, idx).status_code == 200
             assert _v2(storefront, idx).status_code == 200
             assert _erase(erase, idx).status_code == 200
 
@@ -151,8 +169,10 @@ class TestScopeAndChannel:
 
     def test_storefront_token_is_refused_on_the_erase_route(self, channel, issue):
         _, storefront = issue(STOREFRONT_SCOPE, CHANNEL)
+        _, erase = issue(ERASE_SCOPE, CHANNEL)
         assert _erase(storefront).status_code == 401
         assert _erase(storefront, header=API_KEY).status_code == 401
+        assert _erase(erase, header=API_KEY).status_code == 401
 
     def test_storefront_routes_read_only_x_api_key(self, cart, channel, issue):
         _, storefront = issue(STOREFRONT_SCOPE, CHANNEL)
@@ -160,11 +180,14 @@ class TestScopeAndChannel:
         assert _v2(storefront, header=ADMIN_KEY).status_code == 401
 
     def test_unknown_channel_answers_the_pinned_status(self, cart, channel, issue):
-        _, storefront = issue(STOREFRONT_SCOPE)
-        _, erase = issue(ERASE_SCOPE)
+        storefront_token, storefront = issue(STOREFRONT_SCOPE)
+        erase_token, erase = issue(ERASE_SCOPE)
         assert _v1(cart, storefront, "no-such-channel").status_code == 404
         assert _v2(storefront, "no-such-channel").status_code == 401
         assert _erase(erase, "no-such-channel").status_code == 404
+        for token in (storefront_token, erase_token):
+            token.refresh_from_db()
+            assert token.last_used_at is None
 
 
 def _failing_keys(issue, scope: str) -> dict[str, str]:
@@ -188,7 +211,8 @@ def test_every_failure_gives_one_response(name, routes, channel, other_channel, 
     scope, call = routes[name]
     outcomes = {kind: _outcome(call(raw)) for kind, raw in _failing_keys(issue, scope).items()}
     assert len(set(outcomes.values())) == 1, outcomes
-    assert outcomes["unknown"][0] in (400, 401)
+    assert outcomes["unknown"][0] == REFUSED[name]
+    assert outcomes["unknown"] == _outcome(call(""))
 
 
 @pytest.mark.django_db
@@ -202,22 +226,25 @@ def test_cart_read_costs_at_most_one_query_more_than_legacy(cart, channel, make_
     with patch("django_checkout.utils.api_keys.access_installed", return_value=False):
         with CaptureQueriesContext(connection) as legacy:
             assert read().status_code == 200
-    with django_assert_max_num_queries(len(legacy) + 1):
+    with CaptureQueriesContext(connection) as first:
+        assert read().status_code == 200
+    assert len(first) <= len(legacy) + 1
+    with django_assert_max_num_queries(len(first)):  # a repeat read costs no more than the first
         assert read().status_code == 200
 
 
 @pytest.mark.django_db
 @pytest.mark.parametrize("model", [APIKey, APIAdminKey])
-def test_admin_pages_never_show_the_raw_key(model, channel, admin_user, rf, settings):
+def test_admin_pages_never_show_the_raw_key(model, channel, admin_user, rf):
     import django_checkout.admin  # noqa: F401 — registers the key admins (no autodiscover in the test settings)
 
-    settings.ROOT_URLCONF = "tests.admin_urls"  # the module has no URLconf of its own
     key = model.objects.create(channel=channel)
     model_admin = admin.site.get_model_admin(model)
     request = rf.get("/")
     request.user = admin_user
     assert not model_admin.has_add_permission(request)
     assert not model_admin.has_change_permission(request, key)
+    assert not model_admin.has_delete_permission(request, key)
     for response in (model_admin.changelist_view(request), model_admin.change_view(request, str(key.pk))):
         html = response.render().content.decode()
         assert response.status_code == 200

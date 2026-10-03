@@ -17,6 +17,7 @@ Tech: Django 5, DRF, Pydantic (v2 API), marshmallow (v1 API), PostgreSQL.
 | `make check` | lint + format-check (ruff) |
 | `make fix` | auto-fix lint + format |
 | `make test` | test suite (pytest + pytest-django) |
+| `make test-legacy` | test suite without django_access (legacy key path) |
 
 ## Conventions
 
@@ -195,6 +196,8 @@ Tests need PostgreSQL (default `postgresql://postgres:postgres@localhost:5432/te
 - Keys: `utils/api_keys.py` `key_is_valid` is the one check (v1 decorators, v2 permission). With
   `django_access` installed it calls `verify_api_key` (scopes `checkout.storefront` / `checkout.erase`) and never
   reads `APIKey` / `APIAdminKey`; legacy keys work only as imported tokens. Soft dependency — never in `pyproject.toml`.
+  Without `django_access`, legacy keys come only from `generate-api-key` / `generate-api-admin-key` (the admin masks
+  keys, so a key added there could not be read back). Erase tokens need `--expires-days` (secret scope).
 
 ## Management commands
 

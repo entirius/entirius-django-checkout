@@ -6,7 +6,8 @@
   `ChannelAPIKeyPermission`) and the X-API-ADMIN-KEY erase route check access tokens through
   `verify_api_key` (scopes `checkout.storefront`, `checkout.erase`), never the legacy tables. Without
   django-access nothing changes. `generate-api-key` / `generate-api-admin-key` then refuse and name
-  `access_token create`; the key admins become read-only.
+  `access_token create`; the key admins become read-only (no add, change or delete).
+  Without django-access, keys come only from those commands; the admin masks keys, so an admin-added key can't be read back.
 - Key admins show only the last four characters of a key.
 
 ## 9.3.0 — 2026-08-06

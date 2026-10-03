@@ -51,4 +51,5 @@ def _token_is_valid(request, key: str, scope: str, channel_idx: str | None) -> b
 
 def token_command(scope: str, channel_idx: str) -> str:
     """What replaces the legacy key commands when access is installed."""
-    return f"manage.py access_token create --scope {scope} --channel {channel_idx} --application <name>"
+    command = f"manage.py access_token create --scope {scope} --channel {channel_idx} --application <name>"
+    return f"{command} --expires-days <n>" if scope == ERASE_SCOPE else command
