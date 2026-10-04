@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Access: the module declares its own access areas on its AppConfig and its admin views (copied from the
+  entirius-django-access defaults; behaviour unchanged).
 - Keys verified by django-access when installed: the storefront key (v1 `@channel_view`, v2
   `ChannelAPIKeyPermission`) and the X-API-ADMIN-KEY erase route check access tokens through
   `verify_api_key` (scopes `checkout.storefront`, `checkout.erase`), never the legacy tables. Without

@@ -49,6 +49,7 @@ def _get_order(channel, uid: str) -> Order:
 class AdminOrderListView(CheckoutChannelMixin, APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAdminUser]
+    access_area = "checkout.orders"
 
     @extend_schema(
         summary="List orders (admin)",
@@ -81,6 +82,7 @@ class AdminOrderListView(CheckoutChannelMixin, APIView):
 class AdminOrderDetailView(CheckoutChannelMixin, APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAdminUser]
+    access_area = "checkout.orders"
 
     @extend_schema(
         summary="Retrieve order detail (admin)",
@@ -124,6 +126,7 @@ class AdminOrderDetailView(CheckoutChannelMixin, APIView):
 class AdminOrderStatusView(CheckoutChannelMixin, APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAdminUser]
+    access_area = "checkout.orders"
 
     @extend_schema(
         summary="Update order status",
@@ -161,6 +164,7 @@ class AdminOrderStatusView(CheckoutChannelMixin, APIView):
 class AdminOrderCancelView(CheckoutChannelMixin, APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAdminUser]
+    access_area = "checkout.orders"
 
     @extend_schema(summary="Cancel order", description="Cancel order and release stock.", tags=["Checkout Admin"])
     def post(self, request, channel_idx, uid, **kwargs):
@@ -187,6 +191,8 @@ class AdminOrderCancelView(CheckoutChannelMixin, APIView):
 class AdminOrderAttachmentView(CheckoutChannelMixin, APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAdminUser]
+    access_area = "checkout.orders"
+    access_levels = {"GET": "write"}
 
     @extend_schema(summary="List/upload order attachments", tags=["Checkout Admin"])
     def get(self, request, channel_idx, uid, **kwargs):
