@@ -263,3 +263,85 @@ def test_key_commands_refuse_and_name_the_token_command(command, model, scope, c
     with pytest.raises(CommandError, match=f"access_token create --scope {scope} --channel {CHANNEL}"):
         call_command(module.Command(), CHANNEL)
     assert not model.objects.exists()
+
+
+# A pinned token erases only in its channel (D3), by customer e-mail and by body match; an unpinned one everywhere.
+
+ERASED = "erased@test.com"
+
+
+def _body(email: str) -> dict:
+    return {"addresses": {"billing_address": {"firstname": "Jan", "lastname": "Kowalski", "email": email}}}
+
+
+def _rows(channel, label: str) -> list:
+    """An order and a cart found by their customer's e-mail, and an order and a cart found by their body."""
+    from django.contrib.auth import get_user_model
+    from django_accounts.models import Customer
+
+    from django_checkout.models import Cart, Order
+
+    user = get_user_model().objects.create_user(username=f"{label}-{ERASED}", email=ERASED)
+    customer = Customer.objects.create(user=user)
+    by_customer, by_body = {"customer": customer, "channel": channel}, {"channel": channel}
+    return [
+        Order.objects.create(order_body=_body("someone@test.com"), **by_customer),
+        Cart.objects.create(cart_body=_body("someone@test.com"), **by_customer),
+        Order.objects.create(order_body=_body(ERASED), **by_body),
+        Cart.objects.create(cart_body=_body(ERASED), **by_body),
+    ]
+
+
+def _anonymized(rows: list) -> list[bool]:
+    for row in rows:
+        row.refresh_from_db()
+    bodies = [getattr(row, "order_body", None) or row.cart_body for row in rows]
+    return [body["addresses"]["billing_address"]["firstname"] != "Jan" for body in bodies]
+
+
+def _erase_email(key: str, email: str = ERASED):
+    body = json.dumps({"email": email})
+    request = factory.delete("/", data=body, content_type="application/json", **{ADMIN_KEY: key})
+    return admin_customer_delete(request, channel_idx=CHANNEL, version="1")
+
+
+@pytest.mark.django_db
+class TestPinnedErase:
+    def test_pinned_token_erases_only_its_channel(self, channel, other_channel, issue):
+        own, other = _rows(channel, "a"), _rows(other_channel, "b")
+        response = _erase_email(issue(ERASE_SCOPE, CHANNEL)[1])
+        assert response.status_code == 200
+        data = json.loads(response.content)["data"]
+        assert sorted(data["orders"]) == sorted(str(own[i].order_id) for i in (0, 2))
+        assert sorted(data["carts"]) == sorted(str(own[i].cart_id) for i in (1, 3))
+        assert _anonymized(own) == [True] * 4
+        assert _anonymized(other) == [False] * 4
+
+    def test_email_only_in_another_channel_is_not_found(self, channel, other_channel, issue):
+        other = _rows(other_channel, "b")
+        raw = issue(ERASE_SCOPE, CHANNEL)[1]
+        response = _erase_email(raw)
+        assert response.status_code == 404
+        assert _outcome(response) == _outcome(_erase_email(raw, "nobody@test.com"))
+        assert _anonymized(other) == [False] * 4
+
+    @pytest.mark.parametrize(("pinned", "expected"), [(True, CHANNEL), (False, None)])
+    def test_signal_carries_the_erase_channel(self, pinned, expected, channel, issue):
+        from django_checkout.signals import customer_anonymized_signal
+
+        received = []
+
+        def receiver(sender, **kwargs):
+            received.append(kwargs["channel_idx"])
+
+        customer_anonymized_signal.connect(receiver)
+        try:
+            _erase_email(issue(ERASE_SCOPE, CHANNEL if pinned else None)[1])
+        finally:
+            customer_anonymized_signal.disconnect(receiver)
+        assert received == [expected]
+
+    def test_unpinned_token_erases_every_channel(self, channel, other_channel, issue):
+        own, other = _rows(channel, "a"), _rows(other_channel, "b")
+        assert _erase_email(issue(ERASE_SCOPE)[1]).status_code == 200
+        assert _anonymized(own + other) == [True] * 8

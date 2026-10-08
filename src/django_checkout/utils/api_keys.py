@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 from django.apps import apps
 
-from django_checkout.models import APIAdminKey, APIKey
+from django_checkout.models import APIAdminKey, APIKey, Channel
 
 STOREFRONT_SCOPE = "checkout.storefront"
 ERASE_SCOPE = "checkout.erase"
@@ -47,6 +47,15 @@ def _token_is_valid(request, key: str, scope: str, channel_idx: str | None) -> b
     if token is not None:
         request.access_token = token
     return token is not None
+
+
+def erase_channel(request) -> Channel | None:
+    """The channel a GDPR erase is limited to: the URL's when the access token is pinned, else None (every channel).
+
+    The key check already refused a pin that differs from the URL, so the request's channel is the pin.
+    """
+    token = getattr(request, "access_token", None)
+    return request.channel if token is not None and token.channel_idx else None
 
 
 def token_command(scope: str, channel_idx: str) -> str:

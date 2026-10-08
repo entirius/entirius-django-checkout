@@ -13,6 +13,7 @@ from process_logger import ProcessLogger
 
 from django_checkout.services.customer import CustomerService
 from django_checkout.utils.api.decorators import admin_view
+from django_checkout.utils.api_keys import erase_channel
 
 logger = ProcessLogger("CHECKOUT_ADMIN_VIEW", module="django_checkout")
 
@@ -37,7 +38,9 @@ def admin_customer_delete(request: WSGIRequest, *args, **kwargs):
 
     customer_service = CustomerService()
     customer_service.set_logger(logger)
-    success, orders_idxs, carts_idxs, orders_fail, carts_fail = customer_service.anonymize_customer(email)
+    success, orders_idxs, carts_idxs, orders_fail, carts_fail = customer_service.anonymize_customer(
+        email, erase_channel(request)
+    )
 
     if not success:
         raise BadRequest(
