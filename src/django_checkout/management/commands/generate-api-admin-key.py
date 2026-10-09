@@ -5,9 +5,10 @@
 import os
 
 from django.conf import settings
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 
 from django_checkout.models import APIAdminKey, Channel
+from django_checkout.utils.api_keys import ERASE_SCOPE, access_installed, token_command
 
 
 class Command(BaseCommand):
@@ -19,6 +20,8 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         channel_idx = options["channel_idx"]
+        if access_installed():
+            raise CommandError(f"Keys are access tokens now: {token_command(ERASE_SCOPE, channel_idx)}")
         file_path = options["file_path"]
         if file_path is None:
             dir_path = os.path.join(settings.DATA_DIR, "tmp/checkout-api-admin-key/")

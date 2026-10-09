@@ -2,11 +2,24 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+import secrets
+
 import pytest
+from django.apps import apps
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 
+from django_checkout.utils.api_keys import ERASE_SCOPE, STOREFRONT_SCOPE  # noqa: F401 — the helpers' vocabulary
+
 User = get_user_model()
+
+
+def import_keys_into_access() -> None:
+    """With django_access installed keys are tokens: import the legacy rows as a deploy's migrate does."""
+    if apps.is_installed("django_access"):
+        from django_access.services.legacy import import_legacy_keys
+
+        import_legacy_keys()
 
 
 @pytest.fixture
@@ -90,12 +103,38 @@ def channel(db, default_language, default_currency, default_country):
 
 
 @pytest.fixture
+def other_channel(channel):
+    """A second channel with the first one's defaults."""
+    from django_checkout.models import Channel
+
+    return Channel.objects.create(
+        idx="other-channel",
+        label="Other Channel",
+        min_order_price=0,
+        default_language=channel.default_language,
+        default_currency=channel.default_currency,
+        default_country=channel.default_country,
+    )
+
+
+@pytest.fixture
+def cart(channel):
+    from django_checkout.services import cart_service
+
+    record, _ = cart_service.create_cart(
+        channel=channel, items=[], currency_code="EUR", language_code="en", country_code="PL"
+    )
+    return record
+
+
+@pytest.fixture
 def api_key(channel):
     """Create an APIKey for the test channel."""
     from django_checkout.models import APIKey
 
     key = APIKey(channel=channel)
     key.save()
+    import_keys_into_access()
     return key
 
 
@@ -124,3 +163,24 @@ def auth_customer_client(api_client, api_key, regular_user):
     api_client.credentials(HTTP_X_API_KEY=api_key.key)
     api_client.force_authenticate(user=regular_user)
     return api_client
+
+
+@pytest.fixture
+def make_api_key(db):
+    """Create a key the module accepts today and return its raw value.
+
+    ``scope`` picks the table: ``ERASE_SCOPE`` → ``APIAdminKey`` (X-API-ADMIN-KEY), anything else → ``APIKey``
+    (X-API-KEY). With django_access installed the key is also imported as a legacy token. The key contract tests go
+    through this helper only, so moving the checks onto another key store
+    changes this function, never the assertions. Values are random and never printed.
+    """
+    from django_checkout.models import APIAdminKey, APIKey
+
+    def make_api_key(channel=None, scope: str | None = None) -> str:
+        model = APIAdminKey if scope == ERASE_SCOPE else APIKey
+        raw = secrets.token_hex(32)
+        model.objects.create(channel=channel, key=raw)
+        import_keys_into_access()
+        return raw
+
+    return make_api_key
