@@ -13,5 +13,6 @@ order_created_signal = Signal()
 order_additional_info = Signal()
 stock_changed_signal = Signal()
 # Emitted after a customer erasure (RODO/GDPR) so downstream modules can scrub
-# their own PII rows. Kwargs: email: str, order_ids: list[str].
+# their own PII rows. Kwargs: email: str, order_ids: list[str], channel_idx: str | None — a pinned erase token
+# limits the erasure to that channel (receivers scope to it); None = every channel.
 customer_anonymized_signal = Signal()

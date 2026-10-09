@@ -27,6 +27,9 @@ Tech: Django 5, DRF, Pydantic (v2 API), marshmallow (v1 API), PostgreSQL.
 - Git flow: `master` (production) + `develop` (integration); changes land via PR; semver tag on `master`.
 - Never rename the package / Django app_label / DB table prefix `django_checkout` — it is a schema contract.
 - Migrations are part of the public contract — never edit an already released migration.
+- Access: areas and token scopes live on the AppConfig (`access_areas`, `access_token_scopes`,
+  `access_route_rules`), every admin view carries `access_area`; a new admin route without one fails
+  `tests/test_access_ownership.py`.
 - Default: do not commit — git is the user's call.
 
 ## Commit Message Format
@@ -198,6 +201,7 @@ Tests need PostgreSQL (default `postgresql://postgres:postgres@localhost:5432/te
   reads `APIKey` / `APIAdminKey`; legacy keys work only as imported tokens. Soft dependency — never in `pyproject.toml`.
   Without `django_access`, legacy keys come only from `generate-api-key` / `generate-api-admin-key` (the admin masks
   keys, so a key added there could not be read back). Erase tokens need `--expires-days` (secret scope).
+  A pinned erase token anonymises only its channel's orders and carts (`erase_channel`); an unpinned one every channel.
 
 ## Management commands
 
