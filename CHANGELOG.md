@@ -17,6 +17,8 @@
   channel, so after the upgrade they erase only there. An unpinned token, and the path without django-access, still
   erase in every channel. `CustomerService.anonymize_customer(email, channel=None)`; `customer_anonymized_signal` carries `channel_idx`
   (None = every channel) — a receiver scrubbing by e-mail must scope to it.
+- OpenAPI: the admin order list is a ViewSet (same URL, URL name and payload), generated as
+  `checkout_v2_admin_orders_list` with its paginated response; the storefront path parameters are described.
 
 ## 9.3.0 — 2026-08-06
 
