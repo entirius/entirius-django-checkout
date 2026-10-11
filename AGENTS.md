@@ -202,6 +202,8 @@ Tests need PostgreSQL (default `postgresql://postgres:postgres@localhost:5432/te
   Without `django_access`, legacy keys come only from `generate-api-key` / `generate-api-admin-key` (the admin masks
   keys, so a key added there could not be read back). Erase tokens need `--expires-days` (secret scope).
   A pinned erase token anonymises only its channel's orders and carts (`erase_channel`); an unpinned one every channel.
+- Payment throttles (`utils/api/throttling.py`): the ident is DRF's `get_ident` when `NUM_PROXIES` is set, the TCP
+  peer otherwise, plus the cart id where the request names one. Behind a proxy `NUM_PROXIES` must be set.
 
 ## Management commands
 

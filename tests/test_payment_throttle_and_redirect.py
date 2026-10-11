@@ -15,6 +15,7 @@
    had no throttle at all.
 """
 
+import uuid
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -24,8 +25,8 @@ from django.test import RequestFactory
 from django_checkout import settings as checkout_settings
 from django_checkout.api.v2.views.cart_views import _CartPaymentThrottle
 from django_checkout.domain.payment_redirect_target import is_allowed_bridge_target
-from django_checkout.utils.api.throttling import TooManyRequests, client_ip, enforce_ip_rate_limit
-from django_checkout.views.cart import _carries_pay_code
+from django_checkout.utils.api.throttling import TooManyRequests, client_ip, enforce_ip_rate_limit, throttle_ident
+from django_checkout.views.cart import _carries_pay_code, _throttle_pay_code
 
 factory = RequestFactory()
 
@@ -68,6 +69,116 @@ def test_separate_ips_have_separate_budgets():
 
     with pytest.raises(TooManyRequests):
         enforce_ip_rate_limit(first, scope="test", limit=1, window_seconds=60)
+
+
+# --- Throttle identity behind a reverse proxy --------------------------------------------
+# REMOTE_ADDR is the proxy there: one address, so one bucket, for the whole shop.
+
+PROXY = "10.0.0.1"
+
+
+@pytest.fixture
+def num_proxies(settings):
+    """Pin DRF's NUM_PROXIES; assigning REST_FRAMEWORK reloads ``api_settings``."""
+
+    def _set(count: int) -> None:
+        settings.REST_FRAMEWORK = {**settings.REST_FRAMEWORK, "NUM_PROXIES": count}
+
+    return _set
+
+
+def _behind_proxy(forwarded_for: str):
+    return factory.get("/", HTTP_X_FORWARDED_FOR=forwarded_for, REMOTE_ADDR=PROXY)
+
+
+def test_two_clients_behind_one_proxy_have_separate_budgets(num_proxies):
+    num_proxies(1)
+    first, second = _behind_proxy("203.0.113.7"), _behind_proxy("203.0.113.8")
+
+    enforce_ip_rate_limit(first, scope="test", limit=1, window_seconds=60)
+    enforce_ip_rate_limit(second, scope="test", limit=1, window_seconds=60)  # must not raise
+
+    with pytest.raises(TooManyRequests):
+        enforce_ip_rate_limit(first, scope="test", limit=1, window_seconds=60)
+
+
+def test_only_the_address_the_proxy_appended_counts(num_proxies):
+    """The client writes the left of X-Forwarded-For; the proxy appends the right."""
+    num_proxies(1)
+
+    enforce_ip_rate_limit(_behind_proxy("1.1.1.1, 203.0.113.7"), scope="test", limit=1, window_seconds=60)
+
+    with pytest.raises(TooManyRequests):
+        enforce_ip_rate_limit(_behind_proxy("2.2.2.2, 203.0.113.7"), scope="test", limit=1, window_seconds=60)
+
+
+def test_forwarded_for_is_ignored_without_a_proxy(num_proxies):
+    num_proxies(0)
+
+    enforce_ip_rate_limit(_behind_proxy("203.0.113.7"), scope="test", limit=1, window_seconds=60)
+
+    with pytest.raises(TooManyRequests):
+        enforce_ip_rate_limit(_behind_proxy("203.0.113.8"), scope="test", limit=1, window_seconds=60)
+
+
+CART_A = "0b5f0f0e-3c1a-4d2b-9a7e-5c1d2e3f4a5b"
+CART_B = "7d9c2a1b-8e4f-4c3d-b2a1-6f5e4d3c2b1a"
+
+
+def test_one_cart_cannot_drain_another_carts_allowance():
+    request = factory.get("/", REMOTE_ADDR=PROXY)
+
+    enforce_ip_rate_limit(request, scope="test", limit=1, window_seconds=60, cart_id=CART_A)
+    enforce_ip_rate_limit(request, scope="test", limit=1, window_seconds=60, cart_id=CART_B)  # must not raise
+
+    with pytest.raises(TooManyRequests):
+        enforce_ip_rate_limit(request, scope="test", limit=1, window_seconds=60, cart_id=CART_A)
+
+
+@pytest.mark.parametrize("spelling", [CART_A.upper(), CART_A.replace("-", ""), f"{{{CART_A}}}", uuid.UUID(CART_A)])
+def test_another_spelling_of_a_cart_id_is_the_same_bucket(spelling):
+    request = factory.get("/", REMOTE_ADDR=PROXY)
+
+    assert throttle_ident(request, spelling) == throttle_ident(request, CART_A)
+
+
+@pytest.mark.parametrize("not_a_cart", [None, "", "not-a-uuid", "a b\n" * 100])
+def test_what_is_not_a_cart_id_never_reaches_the_key(not_a_cart):
+    request = factory.get("/", REMOTE_ADDR=PROXY)
+
+    assert throttle_ident(request, not_a_cart) == PROXY
+
+
+def test_v1_pay_code_throttle_is_per_cart(monkeypatch):
+    monkeypatch.setattr(checkout_settings, "PAY_CODE_RATE_LIMIT", 1)
+    request, voucher = factory.get("/", REMOTE_ADDR=PROXY), [{"code": "voucher", "pay_code": VOUCHER_CODE}]
+
+    _throttle_pay_code(request, voucher, CART_A)
+    _throttle_pay_code(request, voucher, CART_B)  # must not raise
+
+    with pytest.raises(TooManyRequests):
+        _throttle_pay_code(request, voucher, CART_A)
+
+
+class _CartView:
+    def __init__(self, cart_id: str) -> None:
+        self.kwargs = {"cart_id": cart_id}
+
+
+def test_v2_payment_throttle_keys_on_the_forwarded_client(num_proxies):
+    num_proxies(1)
+    throttle, view = _CartPaymentThrottle(), _CartView(CART_A)
+
+    first = throttle.get_cache_key(_behind_proxy("203.0.113.7"), view)
+    second = throttle.get_cache_key(_behind_proxy("203.0.113.8"), view)
+
+    assert first != second
+
+
+def test_v2_payment_throttle_keys_on_the_cart():
+    throttle, request = _CartPaymentThrottle(), factory.get("/", REMOTE_ADDR=PROXY)
+
+    assert throttle.get_cache_key(request, _CartView(CART_A)) != throttle.get_cache_key(request, _CartView(CART_B))
 
 
 def test_scopes_do_not_share_a_counter():

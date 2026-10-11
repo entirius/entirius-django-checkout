@@ -70,7 +70,7 @@ def _carries_pay_code(payment_method) -> bool:
     return False
 
 
-def _throttle_pay_code(request, payment_method) -> None:
+def _throttle_pay_code(request, payment_method, cart_id=None) -> None:
     """Rate-limit only the requests that actually carry a pay_code.
 
     Throttling every cart write would punish ordinary editing; the brute-force vector is
@@ -82,6 +82,7 @@ def _throttle_pay_code(request, payment_method) -> None:
             scope="pay_code",
             limit=checkout_settings.PAY_CODE_RATE_LIMIT,
             window_seconds=checkout_settings.PAY_CODE_RATE_WINDOW_SECONDS,
+            cart_id=cart_id,
         )
 
 
@@ -282,7 +283,7 @@ def get_or_put_cart(request, cart_id, *args, **kwargs):
 
     @parse_body(CartRequest.Schema)
     def put_cart(request, cart_id, body: CartRequest, *args, **kwargs):
-        _throttle_pay_code(request, body.payment_method)
+        _throttle_pay_code(request, body.payment_method, cart_id)
         record = Cart.objects.get_record(request, cart_id)
 
         customer = request.user.customer if (request.user is not None and request.user.is_customer) else None
@@ -357,7 +358,7 @@ def get_or_put_cart(request, cart_id, *args, **kwargs):
 
     @parse_body(CartRequest.Schema)
     def update_cart(request, cart_id, body: CartRequest, *args, **kwargs):
-        _throttle_pay_code(request, body.payment_method)
+        _throttle_pay_code(request, body.payment_method, cart_id)
         record = Cart.objects.get_record(request, cart_id)
         customer = request.user.customer if (request.user is not None and request.user.is_customer) else None
         if record is None:

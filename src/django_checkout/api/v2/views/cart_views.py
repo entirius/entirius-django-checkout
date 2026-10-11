@@ -37,7 +37,7 @@ from django_checkout.schemas.requests.cart import (
 from django_checkout.schemas.responses.cart import CartV2Response
 from django_checkout.services import cart_service
 from django_checkout.services.cart_response_builder import build_v2_cart_response, build_v2_cart_response_fresh
-from django_checkout.utils.api.throttling import client_ip
+from django_checkout.utils.api.throttling import throttle_ident
 from django_checkout.views.countries import _build_countries_response
 from django_checkout.views.gratis import _build_gratis_response
 from django_checkout.views.payment import _build_payment_methods_response
@@ -304,7 +304,7 @@ class CartPaymentMethodsView(CheckoutChannelMixin, APIView):
 
 
 class _CartPaymentThrottle(SimpleRateThrottle):
-    """Throttle the payment PATCH by client IP (H6). This endpoint carries voucher
+    """Throttle the payment PATCH by client IP and cart (H6). This endpoint carries voucher
     ``pay_code`` (code + PIN) into the voucher anti-brute-force counter, so it needs a
     rate limit independent of the per-voucher lockout — and one that applies whether the
     request is anonymous (channel key only) or JWT-authenticated (AnonRateThrottle would
@@ -318,10 +318,10 @@ class _CartPaymentThrottle(SimpleRateThrottle):
     _FALLBACK_RATE = "30/minute"
 
     def get_cache_key(self, request, view):  # noqa: ANN001, ANN201
-        # Deliberately NOT self.get_ident(): DRF falls back to the raw X-Forwarded-For
-        # chain whenever NUM_PROXIES is unset (the default), and that header is
-        # client-supplied — rotate it per request and the counter never trips.
-        return self.cache_format % {"scope": self.scope, "ident": client_ip(request)}
+        # Not self.get_ident() directly: with NUM_PROXIES unset (the default) DRF trusts the
+        # raw, client-supplied X-Forwarded-For chain. throttle_ident() guards that case.
+        ident = throttle_ident(request, view.kwargs.get("cart_id"))
+        return self.cache_format % {"scope": self.scope, "ident": ident}
 
     def get_rate(self) -> str:
         """Never return None or a malformed rate — in DRF that means "no throttling"."""

@@ -20,6 +20,18 @@
 - OpenAPI: the admin order list is a ViewSet (same URL, URL name and payload), generated as
   `checkout_v2_admin_orders_list` with its paginated response; the storefront path parameters are described.
 
+### Security
+
+- The payment and pay-code throttles count the client, not the reverse proxy: with DRF's `NUM_PROXIES` set the
+  address comes from the `X-Forwarded-For` entries the trusted proxies appended (`0` = no proxy, the header is
+  ignored); unset, the TCP peer address is used as before. Behind a proxy the whole shop shared one allowance, so
+  ordinary traffic could exhaust it. Where the request names a cart, the allowance is counted per client and cart.
+
+### Upgrade notes
+
+- **Behind a reverse proxy:** set DRF's `NUM_PROXIES` to the number of trusted proxies in front of the service;
+  without it the throttles see the proxy as the one client of the whole shop.
+
 ## 9.3.0 — 2026-08-06
 
 - Payment security hardening: payment endpoint throttling and PayU notify
