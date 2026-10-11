@@ -204,6 +204,8 @@ Tests need PostgreSQL (default `postgresql://postgres:postgres@localhost:5432/te
   A pinned erase token anonymises only its channel's orders and carts (`erase_channel`); an unpinned one every channel.
 - Payment throttles (`utils/api/throttling.py`): the ident is DRF's `get_ident` when `NUM_PROXIES` is set, the TCP
   peer otherwise, plus the cart id where the request names one. Behind a proxy `NUM_PROXIES` must be set.
+- PayU notifications need `second_key` in the method's `additional_data` (403 without it); `checks.py` reports
+  PayU methods that lack it as `django_checkout.W001` (database-tagged: `manage.py check --database default`).
 
 ## Management commands
 

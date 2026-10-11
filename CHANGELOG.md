@@ -26,9 +26,16 @@
   address comes from the `X-Forwarded-For` entries the trusted proxies appended (`0` = no proxy, the header is
   ignored); unset, the TCP peer address is used as before. Behind a proxy the whole shop shared one allowance, so
   ordinary traffic could exhaust it. Where the request names a cart, the allowance is counted per client and cart.
+- PayU: a PayU method without `second_key` is reported by the system check `django_checkout.W001`
+  (`manage.py check --database default`, also printed by `migrate`), and a notification refused for that reason is
+  logged once per method at warning level, without the payload.
 
 ### Upgrade notes
 
+- **PayU:** every PayU payment method (`payu`, `payu_card`, `payu_blik`) needs `second_key` (the second key of the
+  POS in the PayU merchant panel) in its `additional_data`. Since 9.3.0 a notification that cannot be verified is
+  answered 403, so a method configured before that confirms no payment until the key is set. Run
+  `manage.py check --database default` after upgrading: `django_checkout.W001` lists the methods that lack it.
 - **Behind a reverse proxy:** set DRF's `NUM_PROXIES` to the number of trusted proxies in front of the service;
   without it the throttles see the proxy as the one client of the whole shop.
 

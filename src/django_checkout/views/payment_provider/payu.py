@@ -17,11 +17,27 @@ from django_checkout.domain.payment_provider.payu_signature import (
 )
 from django_checkout.domain.reservation import release_stock_reservation
 from django_checkout.enums import OrderStatus, PaymentIntentStatus
-from django_checkout.models import Order, PaymentIntent
+from django_checkout.models import Order, PaymentIntent, PaymentMethod
 
 from ...bi import Checkout_PayuNotifyEvent
 
 logger_process = ProcessLogger("PAYMENT_PAYU_PROVIDER_NOTIFY")
+
+# Payment methods already reported as lacking the second key: PayU retries a refused
+# notification for 72h, and one line per method (and process) is enough to act on.
+_warned_methods: set[int] = set()
+
+
+def _warn_missing_second_key(method: PaymentMethod) -> None:
+    if method.pk in _warned_methods:
+        return
+    _warned_methods.add(method.pk)
+    # Log params outlive a request; an earlier notification's body must not ride on this line.
+    logger_process.set_log_params({"details": {"payment_method_pk": method.pk}})
+    logger_process.warning(
+        f"PayU notifications for payment method {method} are refused: '{SECOND_KEY_FIELD}' is missing "
+        "in additional_data, so the signature cannot be verified"
+    )
 
 
 @csrf_exempt
@@ -74,13 +90,12 @@ def payu_notify(request: WSGIRequest, *args, **kwargs):
     second_key = (method.additional_data or {}).get(SECOND_KEY_FIELD) if method else None
     if not is_valid_notification(request.body, request.headers.get(SIGNATURE_HEADER), second_key):
         extra = {"payu_order_id": payu_order_id, "is_status_changed": False, "has_second_key": bool(second_key)}
-        logger_process.add_log_param("payu_order_id", payu_order_id)
-        logger_process.add_log_param("is_status_changed", False)
-        logger_process.error(
-            "PayU notification signature is invalid or unverifiable"
-            if second_key
-            else f"PayU PaymentMethod is missing '{SECOND_KEY_FIELD}' in additional_data — cannot verify notification"
-        )
+        if second_key or method is None:
+            logger_process.add_log_param("payu_order_id", payu_order_id)
+            logger_process.add_log_param("is_status_changed", False)
+            logger_process.error("PayU notification signature is invalid or unverifiable")
+        else:
+            _warn_missing_second_key(method)
         bev.finish_with_error(finish_tag="PayU notification signature verification failed", details=extra)
         # Not 200, deliberately: PayU retries for 72h, so a channel whose second_key is not
         # configured yet gets a window to fix it instead of silently losing payments.

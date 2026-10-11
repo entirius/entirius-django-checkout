@@ -41,4 +41,4 @@ class DjangoCheckoutConfig(AppConfig):
     access_route_rules = []
 
     def ready(self):
-        pass
+        from django_checkout import checks  # noqa: F401 — registers the system checks
