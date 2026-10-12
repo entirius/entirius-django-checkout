@@ -10,6 +10,7 @@ from django.db.models import Case, Q, Value, When
 from django.db.models.fields import DecimalField
 from django_accounts.models import Group
 
+from django_checkout.compat import check_constraint
 from django_checkout.domain.payment_provider import (
     AutopayPaymentProvider,
     BasePaymentProvider,
@@ -201,7 +202,7 @@ class PaymentMethod(models.Model):
                 name="unique_cod_payment_per_channel",
                 condition=(Q(is_cash_on_delivery=True) & Q(provider=PaymentProvider.COD)),
             ),
-            models.CheckConstraint(
+            check_constraint(
                 condition=(
                     (Q(is_cash_on_delivery=True) & Q(provider=PaymentProvider.COD)) | Q(is_cash_on_delivery=False)
                 ),
@@ -212,7 +213,7 @@ class PaymentMethod(models.Model):
                 name="unique_free_order_payment_per_channel",
                 condition=(Q(is_free_order=True) & Q(provider=PaymentProvider.FREE_ORDER)),
             ),
-            models.CheckConstraint(
+            check_constraint(
                 condition=((Q(is_free_order=True) & Q(provider=PaymentProvider.FREE_ORDER)) | Q(is_free_order=False)),
                 name="provider_free_order_or_is_free_order_false",
             ),

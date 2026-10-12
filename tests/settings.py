@@ -2,6 +2,9 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+import os
+from importlib.util import find_spec
+
 import dj_database_url
 
 SECRET_KEY = "test-secret-key-for-checkout-v2"
@@ -29,8 +32,12 @@ DATABASES = {
 }
 
 INSTALLED_APPS = [
+    # The admin without autodiscover: the key admin tests import django_checkout.admin themselves.
+    "django.contrib.admin.apps.SimpleAdminConfig",
     "django.contrib.contenttypes",
     "django.contrib.auth",
+    "django.contrib.sessions",
+    "django.contrib.messages",
     "rest_framework",
     "drf_spectacular",
     "django_regional",
@@ -38,6 +45,31 @@ INSTALLED_APPS = [
     "django_pim",
     "django_pricemanager",
     "django_checkout",
+]
+# Soft dependency: with django-access importable (zeno) keys are checked as access tokens;
+# ENTIRIUS_TEST_NO_ACCESS=1 (make test-legacy) runs the legacy key path.
+if find_spec("django_access") and not os.environ.get("ENTIRIUS_TEST_NO_ACCESS"):
+    INSTALLED_APPS.append("django_access")
+
+MIDDLEWARE = [
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+]
+ROOT_URLCONF = "tests.admin_urls"
+
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
+            ]
+        },
+    }
 ]
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
@@ -54,6 +86,18 @@ SPECTACULAR_SETTINGS = {
     "TITLE": "Checkout API v2",
     "VERSION": "2.0.0",
 }
+
+# The IP rate limiter is cache-backed, so pin the backend rather than inheriting a
+# default. LocMem supports incr() and raises ValueError on a missing key, same as
+# django-redis in production.
+CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
+
+# The v1 views authenticate through django.contrib.auth, which needs the JWT backend
+# wired up; the v2 tests use force_authenticate and never reach it.
+AUTHENTICATION_BACKENDS = [
+    "django_accounts.backends.JWTAccessBackend",
+    "django.contrib.auth.backends.ModelBackend",
+]
 
 # Checkout-specific settings
 API_BASE_URL = "/api/"

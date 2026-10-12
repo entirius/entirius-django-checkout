@@ -152,11 +152,11 @@ class StripePaymentProvider(BasePaymentProvider, ProcessLoggerMixin):
 
     def process_order(self, order: "Order", cart: Optional["Cart"] = None) -> str:
         self.check_connection_data()
-        self.provider_request = self.build_stripe_data(order, cart)
 
         stripe.api_key = self.payment_method.additional_data["api_key"]
 
         try:
+            self.provider_request = self.build_stripe_data(order, cart)
             result = stripe.checkout.Session.create(**self.provider_request)
             self.redirect_url = result["url"] if "url" in result else None
             self.order_id = result["id"] if "id" in result else None
@@ -297,7 +297,9 @@ class StripePaymentProvider(BasePaymentProvider, ProcessLoggerMixin):
             "metadata": {"channel": order.channel.idx, "order_idx": str(order.order_id)},
             "mode": "payment",
             "ui_mode": "hosted",
-            "success_url": order_dto.primary_payment_method.add_order_id_to_continue_url(order.pretty_id),
+            "success_url": self.resolve_continue_url(
+                order_dto.primary_payment_method.add_order_id_to_continue_url(order.pretty_id), order
+            ),
         }
 
         if use_automatic_tax:

@@ -42,7 +42,7 @@ class PayNowPaymentProvider(BasePaymentProvider, ProcessLoggerMixin):
             if "redirect_url" in self.payment_method.additional_data:
                 redirect_url = self.payment_method.additional_data["redirect_url"]
                 redirect_url = redirect_url.replace("<order_id>", order.pretty_id)
-                self.provider_request.continueUrl = redirect_url
+                self.provider_request.continueUrl = self.resolve_continue_url(redirect_url, order)
 
             if "description" in self.payment_method.additional_data:
                 self.provider_request.description = self.payment_method.additional_data["description"]

@@ -20,6 +20,7 @@ from django_checkout.enums import ItemStatus
 class SkuQuantityData:
     sku: str
     quantity: Decimal = field(metadata={"validate": marshmallow.validate.Range(min=0)})
+    option_title: str | None = None
 
 
 @add_schema
@@ -30,6 +31,11 @@ class ItemData:
     offer_price: Decimal | None
     extra: dict | None
     sub_items: list[SkuQuantityData] | None
+    # Gift-card personalization + design choice. kw_only keeps the positional ctor
+    # and ValidatedItemData's non-default fields intact; default=None makes the
+    # marshmallow field optional so pre-existing cart bodies still load.
+    # Deliberately NOT part of sku_identifier/extra — must stay price-neutral.
+    voucher_gift: dict | None = field(default=None, kw_only=True)
     Schema: ClassVar[type[Schema]] = Schema
 
     def dict_factory(self):
@@ -96,11 +102,12 @@ class ValidatedItemData(ItemData):
     discount_amount_netto: Decimal | None = None
 
     @staticmethod
-    def invalid_factory(sku, status, is_gratis, quantity, name=""):
+    def invalid_factory(sku, status, is_gratis, quantity, name="", voucher_gift=None):
         return ValidatedItemData(
             sku=sku,
             quantity=quantity,
             extra={},
+            voucher_gift=voucher_gift,
             discount_amount=0,
             offer_price=0,
             special_from_date="",

@@ -64,6 +64,7 @@ _TAG = "Checkout Admin"
 class _AdminView(CheckoutChannelMixin, APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAdminUser]
+    access_area = "checkout.discounts"
 
 
 def _bad_request(message: str) -> Response:

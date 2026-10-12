@@ -99,6 +99,34 @@ def customer_modifier_filter(discount_rule_query, customer):
     return discount_rule_query.filter(main_discount_rule_filters)
 
 
+def get_highest_priority_rule_for_cart(rules_query, cart_data: CartData | DiscountItems, channel: "Channel"):
+    """First rule in priority order that actually discounts something in this cart.
+
+    Rule-level filters (min_order_amount, active dates, target) say nothing about whether a
+    rule's mode_of_action matches any cart item. A rule that matches nothing discounts nothing,
+    so it must not win priority arbitration and push other rules out of the result below.
+
+    Matching a rule against the cart is expensive, so it is only done when the winner can
+    actually change the outcome. Both callers below narrow subsets of `rules_query`, so when
+    every rule shares one `combine_with_other_rules` value the filters they apply are no-ops
+    and any winner gives the same result.
+    """
+    # imported here: discount_worker imports validate_discounts from this module
+    from django_checkout.worker.discount_worker import filter_by_inclusion_and_exclusion
+
+    if not cart_data.items:
+        return rules_query.first()
+
+    rules = list(rules_query)
+    if len(rules) < 2 or all(rule.combine_with_other_rules for rule in rules):
+        return rules[0] if rules else None
+
+    for rule in rules:
+        if filter_by_inclusion_and_exclusion(rule, cart_data, channel=channel).exists():
+            return rule
+    return None
+
+
 def is_currency_supported_by_discount(extra_value, currency_code):
     """
     Sprawdza czy waluta jest obsługiwana przez regułę rabatową.
@@ -236,7 +264,7 @@ def validate_discounts(
     else:
         combined_query = base_query.filter(automatic_applications=True)
 
-    highest_priority_discount_rule = combined_query.first()
+    highest_priority_discount_rule = get_highest_priority_rule_for_cart(combined_query, cart_data, channel)
 
     if discounts:
         valid_used_codes = DiscountCode.objects.filter(

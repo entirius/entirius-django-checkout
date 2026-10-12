@@ -5,6 +5,7 @@
 from dataclasses import field
 from typing import ClassVar
 
+import marshmallow.validate
 from marshmallow import Schema
 from marshmallow_dataclass import add_schema, dataclass
 
@@ -22,7 +23,9 @@ class PaymentData:
     authorization_token: str | None
     continue_url: str | None
     save_card: bool | None
-    pay_code: str | None = None
+    # Bounded: pay_code is an anonymous write channel (channel API key only) that lands
+    # verbatim in cart_body/order_body and renders in the CMS admin.
+    pay_code: str | None = field(default=None, metadata={"validate": marshmallow.validate.Length(max=256)})
     Schema: ClassVar[type[Schema]] = Schema
 
     def add_order_id_to_continue_url(self, order_id: str) -> str | None:

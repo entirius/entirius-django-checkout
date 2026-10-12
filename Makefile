@@ -1,4 +1,4 @@
-.PHONY: help install check fix test
+.PHONY: help install check fix test test-legacy
 .DEFAULT_GOAL := help
 
 help:  ## List targets
@@ -14,3 +14,5 @@ fix:  ## Auto-fix lint + format
 	uv run ruff format .
 test:  ## Test suite (pytest)
 	uv run pytest -x -q
+test-legacy:  ## Test suite without django_access (legacy key path)
+	ENTIRIUS_TEST_NO_ACCESS=1 uv run pytest -x -q

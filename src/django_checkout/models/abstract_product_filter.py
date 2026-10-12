@@ -8,6 +8,8 @@ from django.db import models
 from django.db.models import TextChoices
 from django.utils.translation import gettext_lazy as _
 
+from django_checkout.compat import check_constraint
+
 
 @unique
 class FilterModeType(TextChoices):
@@ -67,25 +69,25 @@ class AbstractProductFilter(models.Model):
     class Meta:
         abstract = True
         constraints = [
-            models.CheckConstraint(
+            check_constraint(
                 condition=models.Q(cart_price_to__gte=models.F("cart_price_from"))
                 | models.Q(cart_price_to__isnull=True)
                 | models.Q(cart_price_from__isnull=True),
                 name="%(class)s_check_cart_price_to_gte_cart_price_from",
             ),
-            models.CheckConstraint(
+            check_constraint(
                 condition=models.Q(qty_to__gte=models.F("qty_from"))
                 | models.Q(qty_to__isnull=True)
                 | models.Q(qty_from__isnull=True),
                 name="%(class)s_check_qty_to_gte_qty_from",
             ),
-            models.CheckConstraint(
+            check_constraint(
                 condition=models.Q(product_price_to__gte=models.F("product_price_from"))
                 | models.Q(product_price_to__isnull=True)
                 | models.Q(product_price_from__isnull=True),
                 name="%(class)s_check_product_price_to_gte_product_price_from",
             ),
-            models.CheckConstraint(
+            check_constraint(
                 condition=models.Q(cart_qty_to__gte=models.F("cart_qty_from"))
                 | models.Q(cart_qty_to__isnull=True)
                 | models.Q(cart_qty_from__isnull=True),

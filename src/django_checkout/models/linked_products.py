@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from django.db import models
 
+from django_checkout.compat import check_constraint
 from django_checkout.enums import AssociationChoices, AuthenticationState
 from django_checkout.models.managers.shipping_product_manager import ProductLink
 
@@ -44,7 +45,7 @@ class LinkedProducts(models.Model):
             ("idx", "value", "payment_method", "association_type"),
         ]
         constraints = [
-            models.CheckConstraint(
+            check_constraint(
                 condition=(
                     models.Q(shipping_method__isnull=False, payment_method__isnull=True)
                     | models.Q(shipping_method__isnull=True, payment_method__isnull=False)

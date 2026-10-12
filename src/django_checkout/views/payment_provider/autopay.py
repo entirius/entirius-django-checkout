@@ -3,10 +3,12 @@
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 import base64
-import xml.etree.ElementTree as ET
 from urllib.parse import unquote
+from xml.etree import ElementTree as ET  # builds the confirmation only; provider XML is parsed by defusedxml
 
 from autopay_sdk.utils.hash import generate_hash
+from defusedxml import DefusedXmlException
+from defusedxml.ElementTree import ParseError, fromstring
 from django.db import transaction as db_transaction
 from django.http import HttpRequest, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -102,8 +104,8 @@ def autopay_return(request: HttpRequest, channel_idx=None, *args, **kwargs) -> H
             raise ValueError("Błąd dekodowania Base64: dane są niepoprawne") from e
 
         try:
-            root = ET.fromstring(xml_data)
-        except ET.ParseError as e:
+            root = fromstring(xml_data)
+        except (ParseError, DefusedXmlException) as e:
             logger.exception(e)
             raise ValueError("Błąd parsowania XML") from e
         logger.add_log_param("body", xml_data)

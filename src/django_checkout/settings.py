@@ -130,3 +130,24 @@ VALIDATE_ADDRESS_EMAIL = getattr(settings, "VALIDATE_ADDRESS_EMAIL", True)
 USE_SOURCE_PRODUCT_WHILE_CONFIGURABLE_ALL_ATTS_DEFAULT = getattr(
     settings, "USE_SOURCE_PRODUCT_WHILE_CONFIGURABLE_ALL_ATTS_DEFAULT", False
 )
+
+# PAYMENT REDIRECT BRIDGE
+# Client URL schemes that skip the bridge (passed to the payment gateway as-is).
+PAYMENT_REDIRECT_DIRECT_SCHEMES = getattr(settings, "PAYMENT_REDIRECT_DIRECT_SCHEMES", ["https"])
+# URL schemes allowed as a bridge redirect target (e.g. "exp" for Expo, "myapp" for a native app).
+# Service deployments extend this list with their own custom schemes.
+PAYMENT_REDIRECT_BRIDGE_TARGET_SCHEMES = getattr(settings, "PAYMENT_REDIRECT_BRIDGE_TARGET_SCHEMES", ["https"])
+# Bridge token TTL (after expiry the endpoint returns 404).
+PAYMENT_REDIRECT_BRIDGE_TTL_MINUTES = int(getattr(settings, "PAYMENT_REDIRECT_BRIDGE_TTL_MINUTES", 120))
+# Hosts allowed as a bridge target for web schemes (http/https). target_url comes from
+# the client, so without this list the bridge would be an open redirector on the shop's
+# domain and certificate. Empty = no web target passes (native app schemes have no
+# meaningful host and are controlled by scheme alone).
+PAYMENT_REDIRECT_ALLOWED_HOSTS = getattr(settings, "PAYMENT_REDIRECT_ALLOWED_HOSTS", [])
+
+# PAY_CODE BRUTE-FORCE LIMIT
+# Voucher codes are bearer instruments and every guess targets a different code, so a
+# per-voucher counter never trips. Rate-limit per IP on requests CARRYING pay_code —
+# regular cart operations are not throttled.
+PAY_CODE_RATE_LIMIT = int(getattr(settings, "PAY_CODE_RATE_LIMIT", 30))
+PAY_CODE_RATE_WINDOW_SECONDS = int(getattr(settings, "PAY_CODE_RATE_WINDOW_SECONDS", 60))

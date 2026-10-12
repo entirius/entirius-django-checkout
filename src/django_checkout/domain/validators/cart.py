@@ -11,6 +11,7 @@ from django_utils.api.errors import ErrorInfo
 from django_utils.api.exceptions import BadRequest
 
 from django_checkout import settings
+from django_checkout.domain.bundle import resolve_bundle_prices
 from django_checkout.domain.cart_limiters import (
     check_cart_is_too_heavy,
     check_cart_volume_exceeded,
@@ -140,7 +141,7 @@ def validate_cart_data(
 
         # bundle
         saleable_bundles, bundle_items, bundle_errors = check_which_bundle_is_not_saleable(
-            sku_list, channel, items, customer
+            sku_list, channel, items, customer, language=language
         )
         msg_item.extend(bundle_errors)
         saleable_quantity_by_sku = fetch_quantities(sku_list, channel, customer)
@@ -252,6 +253,14 @@ def validate_cart_data(
             validated_addresses=validated_addresses,
             uid=customer.uid if customer else None,
             vat_0=vat_0,
+        )
+        prices_by_sku = resolve_bundle_prices(
+            items=items,
+            channel=channel,
+            country=country_code,
+            currency=currency,
+            prices_by_sku=prices_by_sku,
+            uid=customer.uid if customer else None,
         )
         prices_by_sku, msg_item_offer, error_items = manage_offer_prices(
             items, channel.idx, prices_by_sku, country_code, currency
@@ -387,6 +396,7 @@ def validate_cart_data(
                     status=item_status,
                     is_gratis=False,
                     name=names_by_sku.get(item.sku, item.sku),
+                    voucher_gift=getattr(item, "voucher_gift", None),
                 )
                 result.append(validated_item)
             else:
@@ -524,6 +534,7 @@ def validate_cart_data(
                     quantity=quantity,
                     status=item_status,
                     offer_price=item.offer_price if hasattr(item, "offer_price") else None,
+                    voucher_gift=getattr(item, "voucher_gift", None),
                     base_unit_price=round(base_unit_price, 2),
                     base_total_price=round(base_total_price, 2),
                     special_unit_price=(
@@ -746,7 +757,6 @@ def validate_cart_data(
         tax_amount=sum(item.total_tax_amount for item in validated_items if item.total_tax_amount),
         customs_threshold_scenario=customs_threshold_scenario,
     )
-    _apply_voucher_total(cart, getattr(cart_record, "pk", None))
     # Apply discount rules in priority order (already sorted by priority)
     # This ensures that if gratis has higher priority (lower priority value),
     # it will be checked BEFORE price discounts are applied
@@ -806,6 +816,7 @@ def validate_cart_data(
                     discount_idx=idx,
                     channel=channel,
                     exclude_skus=exclude_skus,
+                    currency_code=currency,
                 )
 
                 if settings.RESTRICT_COMBINE_BY_PRIORITY and is_combine:
@@ -913,7 +924,9 @@ def validate_cart_data(
 
     if left is None:
         raise BadRequest(message="Cart doesn't have items in request or db. Items are needed in create request.")
-    return merge(left, cart), msg, cart_weight, validated_addresses
+    merged_cart = merge(left, cart)
+    _apply_voucher_total(merged_cart, getattr(cart_record, "pk", None))
+    return merged_cart, msg, cart_weight, validated_addresses
 
 
 def merge(l_cart: "CartData", r_cart: "CartData") -> "CartData":
@@ -995,18 +1008,19 @@ def check_min_order_price(channel, validated_cart_data):
         if order_total_too_low:
             msg = ErrorInfo(code="total_not_min_order_price", message="Total is lower than min order price")
             total_to_min_order_price = str(
-                round(channel.min_order_price, 2) - round(total_based_on + float(voucher_paid), 2)
+                round(Decimal(str(channel.min_order_price)), 2) - round(Decimal(str(total_based_on)) + voucher_paid, 2)
             )
     return total_to_min_order_price, msg, order_total_too_low
 
 
 def _apply_voucher_total(cart_data, cart_record_id) -> None:
-    """Apply voucher reduction to cart_data — per-item where ProductVoucher filters
-    define eligibility, then rebuild cart-level aggregates.
+    """Reduce the cart TOTAL by the applied-voucher amount (tender semantics).
 
-    Receiver returns ``{"total": Decimal, "per_sku": {sku: Decimal}}``. Items whose
-    SKU appears in ``per_sku`` get their gross/netto/tax reduced pro-rata; items
-    outside the eligible set stay untouched. Cart totals recomputed from items.
+    A voucher is a payment, not a discount: line items keep their real sold
+    price — they are persisted to order_body and exported (e.g. Magento), where
+    a voucher-mutated price would under-report revenue and break amount
+    reconciliation. Only cart-level total/netto/tax shrink; the tender itself is
+    carried by ``voucher_amount_applied`` and its own PaymentIntent.
 
     Decoupled via ``compute_cart_voucher_total_signal``; no-op when module absent
     or USE_VALIDATE_VOUCHERS_SIGNAL is False.
@@ -1019,16 +1033,27 @@ def _apply_voucher_total(cart_data, cart_record_id) -> None:
     cart_items = [
         (it.sku, Decimal(str(it.total_price or 0))) for it in (cart_data.items or []) if getattr(it, "sku", None)
     ]
+    line_totals: dict[str, Decimal] = {}
+    for sku, line_total in cart_items:
+        line_totals[sku] = line_totals.get(sku, Decimal("0")) + line_total
+
     responses = compute_cart_voucher_total_signal.send(sender=None, cart_id=cart_record_id, cart_items=cart_items)
+    # Defense in depth: cap each amount to its own eligible line total. The voucher
+    # module already caps, but checkout must not let a stale per_sku reduce more than
+    # the eligible lines are worth — else voucher money discounts EXCLUDED products.
     total = Decimal("0")
-    per_sku: dict = {}
     for _, response in responses:
         if response is None:
             continue
         if isinstance(response, dict):
-            total += Decimal(str(response.get("total") or 0))
-            for sku, amt in (response.get("per_sku") or {}).items():
-                per_sku[sku] = per_sku.get(sku, Decimal("0")) + Decimal(str(amt))
+            per_sku = response.get("per_sku")
+            if isinstance(per_sku, dict) and per_sku:
+                for sku, amount in per_sku.items():
+                    capped = min(Decimal(str(amount or 0)), line_totals.get(sku, Decimal("0")))
+                    if capped > 0:
+                        total += capped
+            else:
+                total += Decimal(str(response.get("total") or 0))
         else:
             total += Decimal(str(response))
 
@@ -1036,40 +1061,15 @@ def _apply_voucher_total(cart_data, cart_record_id) -> None:
         return
     cart_data.voucher_amount_applied = total
 
-    if per_sku:
-        for item in cart_data.items or []:
-            amt = per_sku.get(item.sku)
-            if not amt or amt <= 0:
-                continue
-            line_total = Decimal(str(item.total_price or 0))
-            if line_total <= 0:
-                continue
-            reduction = min(amt, line_total)
-            new_total = line_total - reduction
-            tax_rate = Decimal(str(item.tax_rate or 0))
-            divisor = Decimal("1") + tax_rate
-            new_netto = (new_total / divisor).quantize(Decimal("0.01")) if tax_rate else new_total
-            new_tax = new_total - new_netto
-            item.total_price = new_total
-            item.unit_price = (new_total / item.quantity).quantize(Decimal("0.01")) if item.quantity else new_total
-            item.total_price_netto = new_netto
-            item.unit_price_netto = (
-                (new_netto / item.quantity).quantize(Decimal("0.01")) if item.quantity else new_netto
-            )
-            item.total_tax_amount = new_tax
-            item.unit_tax_amount = (new_tax / item.quantity).quantize(Decimal("0.01")) if item.quantity else new_tax
-            item.discount_amount = Decimal(str(item.discount_amount or 0)) + reduction
-
-        cart_data.total_price = sum((Decimal(str(it.total_price or 0)) for it in cart_data.items or []), Decimal("0"))
-        cart_data.total_netto_price = sum(
-            (Decimal(str(it.total_price_netto or 0)) for it in cart_data.items or []), Decimal("0")
-        )
-        cart_data.tax_amount = sum(
-            (Decimal(str(it.total_tax_amount or 0)) for it in cart_data.items or []), Decimal("0")
-        )
-        cart_data.discount_amount = sum(
-            (Decimal(str(it.discount_amount or 0)) for it in cart_data.items or []), Decimal("0")
-        )
-    elif cart_data.total_price is not None:
-        # No eligible items reported — preserve legacy cart-level reduction.
-        cart_data.total_price = max(Decimal("0"), Decimal(str(cart_data.total_price)) - total)
+    # Items carry BASE price (the discount lives only in cart_data.discount_amount),
+    # so never re-sum items here — reduce the already-discounted total directly.
+    if cart_data.total_price is not None:
+        old_total = Decimal(str(cart_data.total_price))
+        reduction = min(total, old_total)
+        new_total = old_total - reduction
+        ratio = (new_total / old_total) if old_total > 0 else Decimal("0")
+        cart_data.total_price = new_total
+        if cart_data.total_netto_price is not None:
+            cart_data.total_netto_price = (Decimal(str(cart_data.total_netto_price)) * ratio).quantize(Decimal("0.01"))
+        if cart_data.tax_amount is not None:
+            cart_data.tax_amount = (Decimal(str(cart_data.tax_amount)) * ratio).quantize(Decimal("0.01"))

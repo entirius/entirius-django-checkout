@@ -33,7 +33,6 @@ class PayUPaymentProvider(BasePaymentProvider, ProcessLoggerMixin):
 
     def process_order(self, order: "Order", cart: Optional["Cart"] = None) -> str:
         self.check_connection_data()
-        self.provider_request = self.build_payu_data(order, cart)
 
         if self.customer and self.customer.customer.user.email and self.customer.ext_customer_id:
             payu = PayU(
@@ -53,6 +52,7 @@ class PayUPaymentProvider(BasePaymentProvider, ProcessLoggerMixin):
         payu.authorize()
 
         try:
+            self.provider_request = self.build_payu_data(order, cart)
             order_id, redirect_url = payu.create_order(self.provider_request)
             if not redirect_url:
                 self.logger.add_log_param_once("order_id", order.order_id)
@@ -135,7 +135,9 @@ class PayUPaymentProvider(BasePaymentProvider, ProcessLoggerMixin):
         return PayUOrder(
             extOrderId=order.pretty_id,
             notifyUrl=self.get_notify_url(),
-            continueUrl=order_dto.primary_payment_method.add_order_id_to_continue_url(order.pretty_id),
+            continueUrl=self.resolve_continue_url(
+                order_dto.primary_payment_method.add_order_id_to_continue_url(order.pretty_id), order
+            ),
             customerIp=self.get_client_ip(),
             merchantPosId=self.payment_method.additional_data["pos_id"],
             description=order.pretty_id,

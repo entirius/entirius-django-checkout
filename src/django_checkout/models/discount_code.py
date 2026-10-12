@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 from django.db import models
 from django.db.models import F, Q
 
+from django_checkout.compat import check_constraint
+
 if TYPE_CHECKING:
     from django_checkout.models.discount_rule_code import DiscountRuleCode
 
@@ -27,10 +29,10 @@ class DiscountCode(models.Model):
 
     class Meta:
         constraints = [
-            models.CheckConstraint(
+            check_constraint(
                 condition=Q(current_used__lte=F("max_used")), name="current_used_lesser_than_or_equal_to_max_used"
             ),
-            models.CheckConstraint(
+            check_constraint(
                 condition=models.Q(active_to__gte=models.F("active_from")),
                 name="check_active_to_greater_than_active_from",
             ),

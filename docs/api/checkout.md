@@ -1895,3 +1895,38 @@ np. {{<base_url>}}/checkout/v1/<channel_idx>/countries/?language=en
     }
 }
 ```
+
+## API surface
+
+### v1 (function-based views, marshmallow DTOs)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/checkout/1/{channel}/carts/` | Create cart |
+| GET | `/api/checkout/1/{channel}/customer/cart/` | Latest customer cart |
+| GET/PATCH | `/api/checkout/1/{channel}/carts/{id}/` | Get/update cart |
+| GET | `/api/checkout/1/{channel}/carts/{id}/shipping-methods/` | Available shipping |
+| GET | `/api/checkout/1/{channel}/carts/{id}/payment-methods/` | Available payment |
+| GET | `/api/checkout/1/{channel}/carts/{id}/gratis-rules/` | Free product rules |
+| POST | `/api/checkout/1/{channel}/carts/{id}/merge/` | Merge guest cart |
+| POST/GET | `/api/checkout/1/{channel}/orders/` | Create/list orders |
+| GET | `/api/checkout/1/{channel}/orders/{id}/` | Order detail |
+| POST | `/api/checkout/1/{channel}/notify/{provider}/` | Payment webhooks |
+
+### v2 (DRF APIViews, Pydantic schemas — in progress)
+
+Sub-resource PATCH pattern. Each PATCH sends one concern, returns full cart.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/checkout/v2/{channel}/carts/` | Create cart |
+| GET | `/api/checkout/v2/{channel}/carts/{id}/` | Cart detail |
+| PATCH | `/api/checkout/v2/{channel}/carts/{id}/items/` | Update items |
+| PATCH | `/api/checkout/v2/{channel}/carts/{id}/addresses/` | Set addresses |
+| PATCH | `/api/checkout/v2/{channel}/carts/{id}/discounts/` | Apply discount codes |
+| PATCH | `/api/checkout/v2/{channel}/carts/{id}/shipping/` | Select shipping |
+| PATCH | `/api/checkout/v2/{channel}/carts/{id}/payment/` | Select payment |
+| POST | `/api/checkout/v2/{channel}/orders/` | Create order |
+| GET | `/api/checkout/v2/{channel}/orders/` | List orders |
+
+v2 price fields use explicit gross/net naming (aligned with Matrix v2).

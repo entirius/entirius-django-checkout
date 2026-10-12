@@ -43,6 +43,15 @@ class PaymentProvider(TextChoices):
         return [PaymentProvider.VOUCHER]
 
     @staticmethod
+    def is_voucher(provider=None, code: str | None = None) -> bool:  # noqa: ANN001
+        """Voucher discriminator — single source of truth. Trust ``provider``, fall
+        back to ``code`` (the PaymentMethod FK is SET_NULL and admins may name the
+        method code differently). Do not re-implement ``provider == "voucher"``."""
+        if provider is not None:
+            return str(provider) == PaymentProvider.VOUCHER
+        return code == PaymentProvider.VOUCHER
+
+    @staticmethod
     def validate_code(code: str, provider) -> bool:
         """
         Validates if the provided code matches the payment provider's code.

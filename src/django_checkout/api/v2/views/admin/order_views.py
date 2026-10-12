@@ -10,7 +10,7 @@ JWT + IsAdminUser auth. Paginated list with filters.
 import logging
 
 from drf_spectacular.utils import OpenApiParameter, extend_schema
-from rest_framework import status
+from rest_framework import status, viewsets
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -21,7 +21,9 @@ from django_checkout.api.v2.pagination import AdminPageNumberPagination
 from django_checkout.enums import OrderStatus
 from django_checkout.models import Order, OrderAttachment, OrderStatusLabel, StockReservation
 from django_checkout.schemas.common import format_money
+from django_checkout.schemas.responses.order import AdminOrderListItemResponse
 from django_checkout.services.order_service import order_lookup_q
+from django_checkout.utils import redact_payment_secrets
 
 logger = logging.getLogger("checkout.v2.admin")
 
@@ -45,9 +47,11 @@ def _get_order(channel, uid: str) -> Order:
     )
 
 
-class AdminOrderListView(CheckoutChannelMixin, APIView):
+class AdminOrderListView(CheckoutChannelMixin, viewsets.ViewSet):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAdminUser]
+    access_area = "checkout.orders"
+    pagination_class = AdminPageNumberPagination
 
     @extend_schema(
         summary="List orders (admin)",
@@ -60,15 +64,14 @@ class AdminOrderListView(CheckoutChannelMixin, APIView):
             OpenApiParameter(name="date_from", description="Created after (ISO date)"),
             OpenApiParameter(name="date_to", description="Created before (ISO date)"),
             OpenApiParameter(name="ordering", description="Sort field"),
-            OpenApiParameter(name="page", type=int),
-            OpenApiParameter(name="page_size", type=int),
         ],
+        responses=AdminOrderListItemResponse,
     )
-    def get(self, request, channel_idx, **kwargs):
+    def list(self, request, channel_idx, **kwargs):
         channel = self.get_channel()
         qs = _build_admin_order_queryset(channel, request.query_params)
 
-        paginator = AdminPageNumberPagination()
+        paginator = self.pagination_class()
         page = paginator.paginate_queryset(qs, request)
 
         labels = {(sl.status, sl.channel_id): sl.name_t9n for sl in OrderStatusLabel.objects.filter(channel=channel)}
@@ -80,6 +83,7 @@ class AdminOrderListView(CheckoutChannelMixin, APIView):
 class AdminOrderDetailView(CheckoutChannelMixin, APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAdminUser]
+    access_area = "checkout.orders"
 
     @extend_schema(
         summary="Retrieve order detail (admin)",
@@ -105,7 +109,7 @@ class AdminOrderDetailView(CheckoutChannelMixin, APIView):
                 "billing_email": order.billing_email,
                 "shipping_email": order.shipping_email,
                 "customer_uid": str(order.customer.user.username) if order.customer else None,
-                "order_body": _redact_payment_secrets(order.order_body),
+                "order_body": redact_payment_secrets(order.order_body),
                 "payment_intents": [
                     {"code": pi.code, "status": pi.payment_status, "external_order_id": pi.external_order_id}
                     for pi in order.payment_items.all()
@@ -123,6 +127,7 @@ class AdminOrderDetailView(CheckoutChannelMixin, APIView):
 class AdminOrderStatusView(CheckoutChannelMixin, APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAdminUser]
+    access_area = "checkout.orders"
 
     @extend_schema(
         summary="Update order status",
@@ -160,6 +165,7 @@ class AdminOrderStatusView(CheckoutChannelMixin, APIView):
 class AdminOrderCancelView(CheckoutChannelMixin, APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAdminUser]
+    access_area = "checkout.orders"
 
     @extend_schema(summary="Cancel order", description="Cancel order and release stock.", tags=["Checkout Admin"])
     def post(self, request, channel_idx, uid, **kwargs):
@@ -186,8 +192,14 @@ class AdminOrderCancelView(CheckoutChannelMixin, APIView):
 class AdminOrderAttachmentView(CheckoutChannelMixin, APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAdminUser]
+    access_area = "checkout.orders"
+    access_levels = {"GET": "write"}
 
-    @extend_schema(summary="List/upload order attachments", tags=["Checkout Admin"])
+    @extend_schema(
+        summary="List/upload order attachments",
+        description="Returns the id and name of every file attached to the order. Called by the admin panel.",
+        tags=["Checkout Admin"],
+    )
     def get(self, request, channel_idx, uid, **kwargs):
         try:
             order = _get_order(self.get_channel(), uid)
@@ -195,7 +207,12 @@ class AdminOrderAttachmentView(CheckoutChannelMixin, APIView):
             return Response(status=status.HTTP_404_NOT_FOUND)
         return Response([{"file_id": a.pk, "name": a.name} for a in order.orderattachment_set.all()])
 
-    @extend_schema(summary="Upload order attachment", tags=["Checkout Admin"])
+    @extend_schema(
+        summary="Upload order attachment",
+        description="Attaches one file of up to 10 MB (PDF, JPEG, PNG, TXT or CSV) to the order. "
+        "Called by the admin panel.",
+        tags=["Checkout Admin"],
+    )
     def post(self, request, channel_idx, uid, **kwargs):
         try:
             order = _get_order(self.get_channel(), uid)
@@ -265,22 +282,3 @@ def _serialize_order_list_item(order, channel, labels):
         "billing_email": order.billing_email,
         "customer_uid": str(order.customer.user.username) if order.customer else None,
     }
-
-
-def _redact_payment_secrets(order_body: dict | None) -> dict:
-    """Strip card tokens, auth tokens, and redirect URLs from order_body before API response.
-
-    These exist in the DB (needed by payment provider integration at order creation time)
-    but must never be exposed via the admin API.
-    """
-    if not order_body:
-        return order_body or {}
-    import copy
-
-    body = copy.deepcopy(order_body)
-    pm = body.get("payment_method")
-    if pm and isinstance(pm, dict):
-        for secret_key in ("card", "authorization_token", "continue_url"):
-            if secret_key in pm:
-                pm[secret_key] = "***REDACTED***"
-    return body
