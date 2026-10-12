@@ -5,8 +5,8 @@
 """PayU notifications are refused without ``second_key``; the check names the methods that lack it."""
 
 import pytest
+from django.core.checks import Tags, run_checks
 from django.core.checks import Warning as CheckWarning
-from django.core.checks import run_checks
 from django.db import ProgrammingError
 
 from django_checkout.enums import PaymentProvider
@@ -18,7 +18,9 @@ CONFIGURED = {"pos_id": "1", "client_id": "1", "second_key": "synthetic-second-k
 
 
 def _payu_warnings(databases=("default",)) -> list:
-    return [message for message in run_checks(databases=databases) if message.id == CHECK_ID]
+    # Database checks only: the URL checks would build the admin URLconf before the key admins register.
+    messages = run_checks(tags=[Tags.database], databases=databases)
+    return [message for message in messages if message.id == CHECK_ID]
 
 
 def _method(channel, code: str, provider: str, additional_data: dict | None) -> PaymentMethod:
