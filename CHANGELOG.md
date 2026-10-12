@@ -22,6 +22,10 @@
 
 ### Security
 
+- Autopay: the notification body is parsed by `defusedxml` (new dependency `defusedxml>=0.7.1`). A document that
+  declares an entity (internal or external) is refused before anything is expanded and takes the
+  parse error path, so the answers of the view are unchanged. The view is public and parsed the body with the
+  standard library before the hash check, so an entity-expansion document cost the worker memory and time.
 - The payment and pay-code throttles count the client, not the reverse proxy: with DRF's `NUM_PROXIES` set the
   address comes from the `X-Forwarded-For` entries the trusted proxies appended (`0` = no proxy, the header is
   ignored); unset, the TCP peer address is used as before. Behind a proxy the whole shop shared one allowance, so
