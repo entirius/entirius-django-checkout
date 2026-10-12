@@ -10,7 +10,7 @@ JWT + IsAdminUser auth. Paginated list with filters.
 import logging
 
 from drf_spectacular.utils import OpenApiParameter, extend_schema
-from rest_framework import status
+from rest_framework import status, viewsets
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -21,6 +21,7 @@ from django_checkout.api.v2.pagination import AdminPageNumberPagination
 from django_checkout.enums import OrderStatus
 from django_checkout.models import Order, OrderAttachment, OrderStatusLabel, StockReservation
 from django_checkout.schemas.common import format_money
+from django_checkout.schemas.responses.order import AdminOrderListItemResponse
 from django_checkout.services.order_service import order_lookup_q
 from django_checkout.utils import redact_payment_secrets
 
@@ -46,10 +47,11 @@ def _get_order(channel, uid: str) -> Order:
     )
 
 
-class AdminOrderListView(CheckoutChannelMixin, APIView):
+class AdminOrderListView(CheckoutChannelMixin, viewsets.ViewSet):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAdminUser]
     access_area = "checkout.orders"
+    pagination_class = AdminPageNumberPagination
 
     @extend_schema(
         summary="List orders (admin)",
@@ -62,15 +64,14 @@ class AdminOrderListView(CheckoutChannelMixin, APIView):
             OpenApiParameter(name="date_from", description="Created after (ISO date)"),
             OpenApiParameter(name="date_to", description="Created before (ISO date)"),
             OpenApiParameter(name="ordering", description="Sort field"),
-            OpenApiParameter(name="page", type=int),
-            OpenApiParameter(name="page_size", type=int),
         ],
+        responses=AdminOrderListItemResponse,
     )
-    def get(self, request, channel_idx, **kwargs):
+    def list(self, request, channel_idx, **kwargs):
         channel = self.get_channel()
         qs = _build_admin_order_queryset(channel, request.query_params)
 
-        paginator = AdminPageNumberPagination()
+        paginator = self.pagination_class()
         page = paginator.paginate_queryset(qs, request)
 
         labels = {(sl.status, sl.channel_id): sl.name_t9n for sl in OrderStatusLabel.objects.filter(channel=channel)}
@@ -194,7 +195,11 @@ class AdminOrderAttachmentView(CheckoutChannelMixin, APIView):
     access_area = "checkout.orders"
     access_levels = {"GET": "write"}
 
-    @extend_schema(summary="List/upload order attachments", tags=["Checkout Admin"])
+    @extend_schema(
+        summary="List/upload order attachments",
+        description="Returns the id and name of every file attached to the order. Called by the admin panel.",
+        tags=["Checkout Admin"],
+    )
     def get(self, request, channel_idx, uid, **kwargs):
         try:
             order = _get_order(self.get_channel(), uid)
@@ -202,7 +207,12 @@ class AdminOrderAttachmentView(CheckoutChannelMixin, APIView):
             return Response(status=status.HTTP_404_NOT_FOUND)
         return Response([{"file_id": a.pk, "name": a.name} for a in order.orderattachment_set.all()])
 
-    @extend_schema(summary="Upload order attachment", tags=["Checkout Admin"])
+    @extend_schema(
+        summary="Upload order attachment",
+        description="Attaches one file of up to 10 MB (PDF, JPEG, PNG, TXT or CSV) to the order. "
+        "Called by the admin panel.",
+        tags=["Checkout Admin"],
+    )
     def post(self, request, channel_idx, uid, **kwargs):
         try:
             order = _get_order(self.get_channel(), uid)

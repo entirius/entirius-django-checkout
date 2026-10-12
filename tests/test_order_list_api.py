@@ -21,9 +21,10 @@ from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIRequestFactory, force_authenticate
 
-from django_checkout.api.v2.views.admin.order_views import AdminOrderDetailView
+from django_checkout.api.v2.views.admin.order_views import AdminOrderDetailView, AdminOrderListView
 from django_checkout.api.v2.views.order_views import OrderAttachmentView, OrderDetailView, OrderListView
 from django_checkout.models import Order, OrderStatusLabel, PaymentMethod
+from django_checkout.schemas.responses.order import AdminOrderListItemResponse
 from django_checkout.utils import payment_entries
 
 factory = APIRequestFactory()
@@ -392,3 +393,21 @@ class TestPaymentSecretRedaction:
 
         order.refresh_from_db()
         assert order.order_body["payment_method"][0]["card"] == "TOK_123"
+
+
+@pytest.mark.django_db
+class TestAdminListRowSchema:
+    @pytest.mark.parametrize("guest", [False, True])
+    def test_row_matches_the_documented_model(self, admin_user, customer, channel, guest):
+        """The OpenAPI item model of the admin list is written by hand, so it must not drift from the row."""
+        _order(channel, None, {}) if guest else _order(channel, customer, _body())
+
+        request = factory.get("/admin/orders/")
+        force_authenticate(request, user=admin_user)
+        response = AdminOrderListView.as_view({"get": "list"})(request, channel_idx=channel.idx)
+
+        assert response.status_code == 200, response.data
+        assert set(response.data) == {"count", "next", "previous", "results"}
+        row = response.data["results"][0]
+        assert set(row) == set(AdminOrderListItemResponse.model_fields)
+        AdminOrderListItemResponse.model_validate(row)

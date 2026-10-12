@@ -20,6 +20,7 @@ silently losing payment confirmations.
 
 import hashlib
 import json
+import logging
 
 import pytest
 from django.test import RequestFactory
@@ -27,6 +28,7 @@ from django.test import RequestFactory
 from django_checkout.domain.payment_provider.payu_signature import is_valid_notification, parse_signature_header
 from django_checkout.enums import OrderStatus, PaymentIntentStatus
 from django_checkout.models import Order, PaymentIntent, PaymentMethod
+from django_checkout.views.payment_provider import payu as payu_view
 from django_checkout.views.payment_provider.payu import payu_notify
 
 factory = RequestFactory()
@@ -210,6 +212,38 @@ def test_channel_without_second_key_rejects_instead_of_trusting(payment_intent, 
     assert response.status_code == 403
     payment_intent.order.refresh_from_db()
     assert payment_intent.order.order_status == OrderStatus.UNPAID
+
+
+@pytest.fixture
+def warnings_logged(monkeypatch, caplog):
+    """The warning records the view emits; the once-per-method memory starts empty."""
+    monkeypatch.setattr(payu_view, "_warned_methods", set())
+    caplog.set_level(logging.WARNING)
+    return lambda: [record for record in caplog.records if record.levelno == logging.WARNING]
+
+
+@pytest.mark.django_db
+def test_missing_second_key_is_logged_once_per_method_without_the_payload(payment_intent, payu_method, warnings_logged):
+    payu_method.additional_data = {"pos_id": "1"}
+    payu_method.save()
+    body = _body()
+    _notify(_body(order_id="EARLIER-UNKNOWN-ORDER"))  # its body stays in the logger's params
+
+    assert [_notify(body, _signed(body)).status_code for _ in range(3)] == [403, 403, 403]
+
+    (record,) = warnings_logged()
+    assert "second_key" in record.getMessage()
+    assert str(payu_method) in record.getMessage()
+    assert set(record.details) == {"payment_method_pk", "locale"}
+
+
+@pytest.mark.django_db
+def test_a_bad_signature_is_not_the_missing_key_warning(payment_intent, warnings_logged):
+    body = _body()
+
+    assert _notify(body, _signed(body, second_key="attacker-key")).status_code == 403
+
+    assert warnings_logged() == []
 
 
 @pytest.mark.django_db

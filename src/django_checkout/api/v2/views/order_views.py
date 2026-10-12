@@ -17,6 +17,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from django_checkout.api.v2.mixins import CheckoutChannelMixin
+from django_checkout.api.v2.openapi import CHANNEL_PARAM, FILE_PARAM, ORDER_PARAM, PRETTY_ID_PARAM
 from django_checkout.api.v2.permissions import ChannelAPIKeyPermission
 from django_checkout.models import Order, OrderAttachment
 from django_checkout.schemas.responses.order import OrderCreateResponse, OrderListResponse
@@ -26,6 +27,7 @@ from django_checkout.utils import redact_payment_secrets
 logger = logging.getLogger("checkout.v2.orders")
 
 
+@extend_schema(parameters=[CHANNEL_PARAM])
 class OrderCreateView(CheckoutChannelMixin, APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [ChannelAPIKeyPermission]
@@ -67,6 +69,7 @@ class OrderCreateView(CheckoutChannelMixin, APIView):
         return Response(data, status=status.HTTP_201_CREATED)
 
 
+@extend_schema(parameters=[CHANNEL_PARAM])
 class OrderListView(CheckoutChannelMixin, APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [ChannelAPIKeyPermission, IsAuthenticated]
@@ -114,6 +117,7 @@ class OrderListView(CheckoutChannelMixin, APIView):
         )
 
 
+@extend_schema(parameters=[CHANNEL_PARAM, PRETTY_ID_PARAM])
 class OrderDetailView(CheckoutChannelMixin, APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [ChannelAPIKeyPermission, IsAuthenticated]
@@ -154,6 +158,7 @@ class OrderDetailView(CheckoutChannelMixin, APIView):
         )
 
 
+@extend_schema(parameters=[CHANNEL_PARAM, ORDER_PARAM, FILE_PARAM])
 class OrderAttachmentView(CheckoutChannelMixin, APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [ChannelAPIKeyPermission, IsAuthenticated]
