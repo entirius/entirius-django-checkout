@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Two orders of one channel placed at the same moment no longer collide on their number: `in_channel_id` was
+  `MAX + 1` read without a lock, so both read the same value and the second insert failed on
+  `in_channel_id_unique_per_channel` (a 500 on order creation). The channel row is locked
+  (`SELECT … FOR UPDATE`) while the number is taken, in the transaction of the insert
+  (`Order.next_in_channel_id()`); orders of other channels are not blocked.
+
 ## 10.0.0 — 2026-10-12
 
 - Access: the module declares its own access areas on its AppConfig and its admin views (copied from the
