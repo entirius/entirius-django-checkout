@@ -15,6 +15,8 @@ from django_checkout.domain.payment_redirect_target import is_allowed_bridge_tar
 from django_checkout.enums import PaymentIntentStatus
 
 if TYPE_CHECKING:
+    from django_utils.api.responses import ErrorInfo
+
     from django_checkout.models import Order, PaymentIntent, PaymentMethod
 
 
@@ -39,12 +41,16 @@ class BasePaymentProvider:
         """Fetch additional fields for PaymentMethod needed to complete the transaction"""
         return {}
 
-    def attach_to_cart(self, cart, payment_data=None) -> list[str]:
+    def attach_to_cart(self, cart, payment_data=None) -> "list[str | ErrorInfo]":
         """Provider-specific side-effects after this payment method is attached to a cart.
 
         Default no-op. Subclasses override to apply codes (e.g. voucher pay_code →
-        CartVoucher rows). Returns a list of human-readable error messages — empty
-        when the attach succeeded fully.
+        CartVoucher rows). Returns a list of errors — empty when the attach succeeded
+        fully. Entries may be plain strings or ``ErrorInfo``; ``process_cart`` puts
+        them straight into ``messages``, which already carries both (see
+        ``views/cart.py:prepare_errors_and_messages``). Prefer ``ErrorInfo`` — a bare
+        string never reaches the response's structured ``errors`` list, so a
+        code-driven client cannot react to it.
 
         ``payment_data`` is the RAW payment-method input of the current request
         (list of PaymentData or legacy dicts). Secrets like voucher pay_code are
