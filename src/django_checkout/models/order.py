@@ -119,10 +119,13 @@ class Order(models.Model):
                     self.order_status = current.order_status
 
         if self.in_channel_id is None:
-            max_id = Order.objects.filter(channel=self.channel).aggregate(max_id=Max("in_channel_id"))["max_id"]
-            self.in_channel_id = 1 if max_id is None else max_id + 1
-
-        super().save(*args, **kwargs)
+            # The number and the insert share one transaction, so the channel lock is held until the
+            # order is visible to the next one.
+            with transaction.atomic():
+                self.in_channel_id = Order.next_in_channel_id(self.channel)
+                super().save(*args, **kwargs)
+        else:
+            super().save(*args, **kwargs)
 
         # after main save, bcs its need create_at timestamp
         if self.pretty_id_snap is None:
@@ -134,6 +137,21 @@ class Order(models.Model):
             order_confirmed_signal.send(sender=Order.__class__, order_id=self.order_id)
         if is_status_changed_to_canceled:
             order_canceled_signal.send(sender=Order.__class__, order_id=self.order_id)
+
+    @staticmethod
+    def next_in_channel_id(channel) -> int:
+        """The next order number of the channel; call it inside a transaction.
+
+        Two orders of one channel created at the same time used to read the same MAX and the second insert
+        failed on `in_channel_id_unique_per_channel`. The channel row is locked first (SELECT ... FOR UPDATE),
+        so orders of one channel are numbered one after another; other channels are not blocked.
+        """
+        if channel is not None:
+            from django_checkout.models.channel import Channel
+
+            list(Channel.objects.select_for_update().filter(pk=channel.pk).values_list("pk", flat=True))
+        max_id = Order.objects.filter(channel=channel).aggregate(max_id=Max("in_channel_id"))["max_id"]
+        return 1 if max_id is None else max_id + 1
 
     @property
     def pretty_id(self):
