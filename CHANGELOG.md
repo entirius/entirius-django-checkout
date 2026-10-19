@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- An automatic discount rule no longer drops out on every other cart write. A write stores the applied
+  automatic discount in the cart (a rule without codes under its name), and the next write narrowed the rules to
+  the codes in the cart, so the rule was gone, then back on the write after. The same narrowing dropped automatic
+  rules from any cart that carries a discount code. `validate_discounts` now keeps automatic rules whatever codes
+  the cart holds.
+
 ## 10.0.0 — 2026-10-12
 
 - Access: the module declares its own access areas on its AppConfig and its admin views (copied from the
