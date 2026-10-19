@@ -9,6 +9,8 @@
   the codes in the cart, so the rule was gone, then back on the write after. The same narrowing dropped automatic
   rules from any cart that carries a discount code. `validate_discounts` now keeps automatic rules whatever codes
   the cart holds.
+- A price discount adds to the discounts earlier rules already gave an item. The last item of the rule took the
+  rest of the amount (for rounding) in place of its whole discount, so e.g. 5 % then 50 off came to 50 off.
 
 ## 10.0.0 — 2026-10-12
 
