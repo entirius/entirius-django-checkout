@@ -127,6 +127,16 @@ def get_highest_priority_rule_for_cart(rules_query, cart_data: CartData | Discou
     return None
 
 
+def rule_label(rule: DiscountRuleCode, cart_codes: list[str]) -> str:
+    """The code a rule goes by in the cart: the code the customer entered, else its first code, else its name.
+
+    An automatic rule is stored in the cart under its first code, or under its name when it has none.
+    """
+    codes = [dc.code for dc in rule.codes.all()]
+    entered = next((code for code in codes if code in cart_codes), None)
+    return entered or (codes[0] if codes else rule.name)
+
+
 def is_currency_supported_by_discount(extra_value, currency_code):
     """
     Sprawdza czy waluta jest obsługiwana przez regułę rabatową.
@@ -306,6 +316,7 @@ def validate_discounts(
             None,
         )
 
+    query_before_arbitration = query
     if highest_priority_discount_rule:
         if not highest_priority_discount_rule.combine_with_other_rules:
             query = query.filter(pk=highest_priority_discount_rule.pk)
@@ -333,6 +344,16 @@ def validate_discounts(
         valid_codes = set(dc.code for dc in all_discount_codes)
 
         rules_by_code = {dc.code: dc.rule for dc in all_discount_codes if dc.code in valid_codes}
+
+        # Codes that are valid but lost priority arbitration: reported as blocked, not as unknown.
+        blocked_codes = (
+            set(
+                DiscountCode.objects.filter(rule__in=query_before_arbitration, *code_filters)
+                .filter(code_is_active_from & code_is_active_to)
+                .values_list("code", flat=True)
+            )
+            - valid_codes
+        )
 
         for discount in discounts:
             if getattr(discount, "is_automatic", False):
@@ -378,6 +399,17 @@ def validate_discounts(
                 rule_dict["is_automatic"] = False
                 rule_dict["clear_discounts"] = getattr(discount, "clear_discounts", False)
                 discount_validated.append((ValidatedDiscountData(**rule_dict, status=ItemStatus.VALID), dc))
+            elif discount.code in blocked_codes:
+                discount_validated.append(
+                    factor_invalid_discount(
+                        rejection_reason="blocked_by_exclusive_rule",
+                        rejection_meta={
+                            "code": discount.code,
+                            "blocking_code": rule_label(highest_priority_discount_rule, discount_codes),
+                            "blocking_priority": highest_priority_discount_rule.priority,
+                        },
+                    )
+                )
             else:
                 discount_validated.append(
                     factor_invalid_discount(

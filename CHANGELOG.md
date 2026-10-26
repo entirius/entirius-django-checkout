@@ -9,6 +9,12 @@
   the codes in the cart, so the rule was gone, then back on the write after. The same narrowing dropped automatic
   rules from any cart that carries a discount code. `validate_discounts` now keeps automatic rules whatever codes
   the cart holds.
+- A valid code that loses priority arbitration (an exclusive rule won, or it is exclusive and a higher-priority rule
+  won) is rejected as `blocked_by_exclusive_rule` (v2 `DISCOUNT_BLOCKED_BY_EXCLUSIVE_RULE`) with meta
+  `{code, blocking_code, blocking_priority}`, not as `code_not_found`. `blocking_code` is the winning rule's code, or
+  its name for an automatic rule without codes. Since automatic rules take part in arbitration whatever codes the
+  cart holds, a combinable automatic rule with a lower `priority` blocks an exclusive code. Unknown and used-up codes
+  stay `code_not_found`; v1 responses don't change.
 - A price discount adds to the discounts earlier rules already gave an item. The last item of the rule took the
   rest of the amount (for rounding) in place of its whole discount, so e.g. 5 % then 50 off came to 50 off.
 - A split order no longer fails with `TypeError` on every cart: the cart's `payment_method` is a list and was passed
