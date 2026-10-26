@@ -363,7 +363,13 @@ def process_cart(
                 "currency_code": currency,
             }
             if rejections:
-                message = "No voucher could be applied: " + "; ".join(r["message"] for r in rejections)
+                reasons = "; ".join(r["message"] for r in rejections)
+                # Another voucher of the cart may still have applied: keep its amount in the wording then.
+                message = (
+                    f"{message} Not applied: {reasons}"
+                    if voucher_paid > 0
+                    else f"No voucher could be applied: {reasons}"
+                )
                 extra["voucher_errors"] = rejections
             messages.append(
                 ErrorInfo(

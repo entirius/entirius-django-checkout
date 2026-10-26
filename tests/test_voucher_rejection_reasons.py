@@ -208,3 +208,29 @@ class TestNothingToReport:
 
         assert error.message.startswith("Voucher covers 0 EUR of 123.00 EUR.")
         assert "voucher_errors" not in error.extra
+
+
+class TestPartlyAppliedVoucher:
+    def test_an_applied_amount_is_not_reported_as_no_voucher(
+        self, channel, cart_awaiting_payment, voucher_method, monkeypatch
+    ):
+        """One code applied 23.00 and another was refused: the customer must see both, not "no voucher"."""
+
+        class _OneRejectedProvider(_RejectingVoucherProvider):
+            rejections = [ErrorInfo(code="voucher_expired", message="Voucher ENT-GIFT-OLD expired on 2026-01-31.")]
+
+        monkeypatch.setattr("django_checkout.settings.USE_VALIDATE_VOUCHERS_SIGNAL", True)
+        with patch(
+            "django_checkout.domain.validators.cart.compute_cart_voucher_total_signal.send",
+            return_value=[(None, {"total": "23.00"})],
+        ):
+            messages = _pay_with_voucher(channel, cart_awaiting_payment, _OneRejectedProvider)
+
+        error = _coverage_error(messages)
+
+        assert error.message.startswith("Voucher covers 23.00 EUR of 123.00 EUR.")
+        assert error.message.endswith("Not applied: Voucher ENT-GIFT-OLD expired on 2026-01-31.")
+        assert error.extra["voucher_amount_applied"] == "23.00"
+        assert error.extra["voucher_errors"] == [
+            {"code": "voucher_expired", "message": "Voucher ENT-GIFT-OLD expired on 2026-01-31."}
+        ]
