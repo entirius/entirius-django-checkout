@@ -383,6 +383,7 @@ def test_list_query_count_does_not_grow_with_the_page(channel, api_key, customer
     """
     for _ in range(3):
         _attach_relations(_order(channel, customer, [_secret_entry()]), methods)
+    _call(channel, api_key, customer_token, limit=100)  # warm-up: an access token's first use records last_used_at
     with CaptureQueriesContext(connection) as small:
         assert len(_call(channel, api_key, customer_token, limit=100)["data"]) == 3
 

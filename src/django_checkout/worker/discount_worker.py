@@ -624,7 +624,7 @@ def calculate_discount_when_price_discount(
         full_discount_price = price_discount
     except TypeError:
         raise Exception(f"Make sure your extra_value for discount.pk = {discount.pk} is valid")
-    discount_amount = discount_amount + (round((full_discount_price * price_percentage), 2))
+    item_share = round((full_discount_price * price_percentage), 2)
 
     valid_non_gratis_items = [
         item
@@ -634,9 +634,11 @@ def calculate_discount_when_price_discount(
 
     # Jeżeli to ostatni element NIE-gratis, przypisuje resztę kwoty discountu by nie było błędu z zaokrągleniem
     if valid_non_gratis_items and current_item == valid_non_gratis_items[-1]:
-        discount_amount = discount_extra_value_rest
+        item_share = discount_extra_value_rest
     else:
-        discount_extra_value_rest -= discount_amount
+        discount_extra_value_rest -= item_share
+    # The item may already carry a discount of an earlier rule: add this rule's share to it.
+    discount_amount = discount_amount + item_share
     cart_data.discounts[discount_idx].price_discount = price_discount
     return cart_data, discount_amount, discount_extra_value_rest
 

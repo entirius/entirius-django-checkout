@@ -15,7 +15,7 @@ Minimalne dane to:
   - Uwaga: nie podanie `"use_sandbox"` skutkuje zawsze uzywaniem sandboxa.
 
 ```json
-{"pos_id": "123456", "client_id": "123456", "use_sandbox": true, "client_secret": "<client-secret-from-payu-panel>"}
+{"pos_id": "123456", "client_id": "123456", "use_sandbox": true, "client_secret": "<client-secret-from-payu-panel>", "second_key": "<second-key-from-payu-panel>"}
 ```
 
 ## Używanie

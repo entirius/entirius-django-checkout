@@ -30,7 +30,7 @@ from django_checkout.api.v2.views.admin.order_views import (
 )
 
 urlpatterns = [
-    path("orders/", AdminOrderListView.as_view(), name="checkout-v2-admin-orders"),
+    path("orders/", AdminOrderListView.as_view({"get": "list"}), name="checkout-v2-admin-orders"),
     path("orders/<str:uid>/", AdminOrderDetailView.as_view(), name="checkout-v2-admin-orders-detail"),
     path("orders/<str:uid>/status/", AdminOrderStatusView.as_view(), name="checkout-v2-admin-orders-status"),
     path("orders/<str:uid>/cancel/", AdminOrderCancelView.as_view(), name="checkout-v2-admin-orders-cancel"),

@@ -63,6 +63,22 @@ class OrderListItemResponse(BaseModel):
     attachments: list[OrderAttachmentResponse] = Field(default_factory=list, description="Order attachments")
 
 
+class AdminOrderListItemResponse(BaseModel):
+    """One row of the admin order list."""
+
+    order_id: str = Field(description="Order UUID")
+    pretty_id: str = Field(description="Human-readable order ID", examples=["0100001"])
+    status: str = Field(description="Current order status", examples=["CONFIRMED"])
+    status_label: str | None = Field(None, description="English status label, the status code when none is set")
+    created: datetime = Field(description="Order creation timestamp")
+    updated: datetime = Field(description="Last update timestamp")
+    total_gross: str | None = Field(None, description="Order total gross", examples=["419.97"])
+    currency: str | None = Field(None, description="Currency code", examples=["EUR"])
+    item_count: int = Field(description="Number of line items")
+    billing_email: str | None = Field(None, description="Billing email address", examples=["jan@example.com"])
+    customer_uid: str | None = Field(None, description="Customer identifier, null for a guest order")
+
+
 class OrderListResponse(BaseModel):
     """Paginated order list."""
 
