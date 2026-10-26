@@ -15,6 +15,10 @@
   its name for an automatic rule without codes. Since automatic rules take part in arbitration whatever codes the
   cart holds, a combinable automatic rule with a lower `priority` blocks an exclusive code. Unknown and used-up codes
   stay `code_not_found`; v1 responses don't change.
+- An exclusive code no longer applies together with automatic rules after a write that sends items (v1 cart PUT,
+  v2 PATCH items). Priority arbitration matches rules against valid cart items, but got the request items, which
+  carry no status yet: no rule matched, none won, and every rule applied. `validate_discounts` now gets the
+  validated items.
 - A price discount adds to the discounts earlier rules already gave an item. The last item of the rule took the
   rest of the amount (for rounding) in place of its whole discount, so e.g. 5 % then 50 off came to 50 off.
 - A split order no longer fails with `TypeError` on every cart: the cart's `payment_method` is a list and was passed
