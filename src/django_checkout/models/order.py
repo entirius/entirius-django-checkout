@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Optional
 
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
-from django.db import models, transaction
+from django.db import IntegrityError, models, transaction
 from django.db.models import Max, Q
 from django.utils import timezone
 from django_pim.models import Product
@@ -55,6 +55,15 @@ def _intent_amount(is_voucher: bool, data) -> Decimal:
     return Decimal(str(data.total or 0))
 
 
+ORDER_NUMBER_CONSTRAINT = "in_channel_id_unique_per_channel"
+ORDER_NUMBER_ATTEMPTS = 5
+
+
+def _is_number_collision(error: IntegrityError) -> bool:
+    """True when the insert failed on the per-channel order number, not on any other constraint."""
+    return getattr(getattr(error.__cause__, "diag", None), "constraint_name", None) == ORDER_NUMBER_CONSTRAINT
+
+
 class Order(models.Model):
     objects = OrderManager()
     channel: "Channel" = models.ForeignKey("Channel", null=True, on_delete=models.SET_NULL)
@@ -83,7 +92,7 @@ class Order(models.Model):
             models.UniqueConstraint(fields=["order_id"], name="unique_order_id"),
             models.UniqueConstraint(
                 fields=["channel", "in_channel_id"],
-                name="in_channel_id_unique_per_channel",
+                name=ORDER_NUMBER_CONSTRAINT,
                 condition=Q(in_channel_id__isnull=False),
             ),
         ]
@@ -119,10 +128,9 @@ class Order(models.Model):
                     self.order_status = current.order_status
 
         if self.in_channel_id is None:
-            max_id = Order.objects.filter(channel=self.channel).aggregate(max_id=Max("in_channel_id"))["max_id"]
-            self.in_channel_id = 1 if max_id is None else max_id + 1
-
-        super().save(*args, **kwargs)
+            self._insert_with_next_number(*args, **kwargs)
+        else:
+            super().save(*args, **kwargs)
 
         # after main save, bcs its need create_at timestamp
         if self.pretty_id_snap is None:
@@ -134,6 +142,30 @@ class Order(models.Model):
             order_confirmed_signal.send(sender=Order.__class__, order_id=self.order_id)
         if is_status_changed_to_canceled:
             order_canceled_signal.send(sender=Order.__class__, order_id=self.order_id)
+
+    def _insert_with_next_number(self, *args, **kwargs):
+        """Insert the order under the next free `in_channel_id`, retrying when a concurrent order took it.
+
+        No lock on purpose: `Order.create` calls the payment gateway inside its transaction, so a channel lock
+        would be held across that HTTP call and queue every order of the channel behind it. On a collision
+        Postgres makes the insert wait for the other transaction and then raises; the savepoint is rolled back
+        and the number read again.
+        """
+        for attempt in range(ORDER_NUMBER_ATTEMPTS):
+            self.in_channel_id = Order.next_in_channel_id(self.channel)
+            try:
+                with transaction.atomic():
+                    super().save(*args, **kwargs)
+                return
+            except IntegrityError as error:
+                if attempt == ORDER_NUMBER_ATTEMPTS - 1 or not _is_number_collision(error):
+                    raise
+
+    @staticmethod
+    def next_in_channel_id(channel) -> int:
+        """The next order number of the channel: MAX + 1 (a concurrent order may take it first)."""
+        max_id = Order.objects.filter(channel=channel).aggregate(max_id=Max("in_channel_id"))["max_id"]
+        return 1 if max_id is None else max_id + 1
 
     @property
     def pretty_id(self):

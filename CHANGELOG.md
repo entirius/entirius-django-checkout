@@ -22,6 +22,13 @@
 - An out-of-stock gratis is no longer offered nor accepted (it reached the cart as `OUT_OF_STOCK` and blocked checkout);
   stock is read for the customer, so a customer's own supplier counts. A gratis SKU without a stock row counts as out
   of stock, as for cart items.
+- Two orders of one channel placed at the same moment no longer collide on their number: `in_channel_id` was
+  `MAX + 1` read without a lock, so both read the same value and the second insert failed on
+  `in_channel_id_unique_per_channel` (a 500 on order creation). The insert now runs in a savepoint and, on that
+  collision only, reads the next number and tries again (up to 5 times); any other `IntegrityError` is raised as
+  before. Nothing is locked: the payment gateway is called inside the order's transaction, so a channel lock would
+  queue every order of the channel behind it. On a collision the second insert waits until the first order's
+  transaction ends.
 
 ## 10.0.0 — 2026-10-12
 
