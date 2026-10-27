@@ -72,7 +72,7 @@ src/django_checkout/
 │       ├── urls.py          # v2 URL patterns
 │       ├── permissions.py   # ChannelAPIKey, AdminJWT
 │       ├── mixins.py        # CheckoutChannelMixin
-│       └── exceptions.py    # v2 error format
+│       └── exceptions.py    # v2 error format, domain messages -> v2 `_errors` details
 ├── schemas/                 # Pydantic models (v2 only)
 │   ├── common.py            # MoneyField, TaxRateField
 │   ├── requests/            # v2 request schemas
@@ -80,7 +80,7 @@ src/django_checkout/
 ├── services/                # Service layer
 │   ├── cart_service.py      # Cart CRUD + sub-resource patches
 │   ├── cart_response_builder.py  # Domain -> v2 response translation
-│   ├── error_mapper.py      # v1 messages -> v2 error details
+│   ├── order_service.py     # v2 order create/list
 │   ├── customer.py          # Customer anonymization
 │   └── stock_sync_service.py # QMS warehouse sync
 ├── worker/                  # Discount calculation, order splitting

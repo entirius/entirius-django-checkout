@@ -50,7 +50,7 @@ def build_v2_cart_response(record: Cart, messages: list | None = None) -> dict:
         min_order_price=Decimal(record.channel.min_order_price).quantize(Decimal("0.01")) if record.channel else None,
     )
 
-    result = response.model_dump(exclude_none=False)
+    result = response.model_dump(exclude_none=False, exclude={"errors"})
 
     if messages:
         details = map_to_v2_details(messages)

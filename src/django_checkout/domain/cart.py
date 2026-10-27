@@ -9,6 +9,7 @@ from django_pricemanager.output import validate_access_to_price_list
 from django_utils.api.responses import ErrorInfo
 
 from django_checkout.domain.dto.cart import CartRequest, CheckoutData
+from django_checkout.domain.dto.discount import DiscountsRejectedError
 from django_checkout.domain.dto.item import SkuQuantityData
 from django_checkout.domain.prices import calc_fee_of_price
 from django_checkout.domain.validators.address import validate_addresses
@@ -33,6 +34,12 @@ def clear_gratis_discounts(data: CartRequest, checkout_data: CheckoutData):
     if getattr(data.cart, "items", None):
         data.cart.items = [item for item in data.cart.items if not getattr(item, "is_gratis", False)]
     return data, checkout_data
+
+
+def _sent_discount_codes(data: CartRequest, checkout_data: CheckoutData) -> list[str]:
+    """The codes the customer entered, in the order sent: the request's, else the stored cart's."""
+    discounts = getattr(data.cart, "discounts", None) or getattr(checkout_data.cart, "discounts", None) or []
+    return [d.code for d in discounts if d.code and not getattr(d, "is_automatic", False)]
 
 
 def process_cart(
@@ -138,6 +145,7 @@ def process_cart(
         for pm in payment_methods:
             voucher_attach_errors.extend(pm.get_provider().attach_to_cart(cart, payment_data=raw_payment_inputs))
         messages.extend(voucher_attach_errors)
+    sent_codes = _sent_discount_codes(data, checkout_data)  # read first: validate_cart_data rewrites the lists
     validated_cart_data, msg, cart_weight, validated_addresses = validate_cart_data(
         data,
         channel,
@@ -167,8 +175,8 @@ def process_cart(
         discount for discount in validated_cart_data.discounts if discount.status == ValidationStatus.VALID
     ]
 
-    if invalid_discounts := [
-        discount.code
+    if rejected_discounts := [
+        discount
         for discount in before_discounts
         if discount.status == ValidationStatus.INVALID and not discount.is_automatic
     ]:
@@ -176,11 +184,14 @@ def process_cart(
             [*validated_cart_data.items, *validated_cart_data.discounts]
         )
         messages.append(
-            ErrorInfo(
+            DiscountsRejectedError(
                 message="Some discounts are invalid",
                 code="one_or_more_discount_invalid",
-                affected_values=invalid_discounts,
+                affected_values=[discount.code for discount in rejected_discounts],
                 affected_field="cart.discounts.code",
+                rejected=rejected_discounts,
+                sent_codes=sent_codes,
+                applied_codes=[discount.code for discount in validated_cart_data.discounts],
             )
         )
 

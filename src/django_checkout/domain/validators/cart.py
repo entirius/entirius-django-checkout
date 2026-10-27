@@ -667,9 +667,13 @@ def validate_cart_data(
         if cart_checkout_data.is_clear_discounts():
             cart_checkout_data.discounts = []
 
+    def with_validated_items(cart_data):
+        # Priority arbitration matches rules against VALID items; request items carry no status yet.
+        return replace(cart_data, items=validated_items_all) if validated_items_all else cart_data
+
     if getattr(data, "discounts", False):
         validated_discounts = validate_discounts(
-            data,
+            with_validated_items(data),
             total_price_validator_based_on,
             channel,
             customer=customer,
@@ -679,7 +683,7 @@ def validate_cart_data(
         )
     elif getattr(cart_checkout_data, "discounts", False):
         validated_discounts = validate_discounts(
-            cart_checkout_data,
+            with_validated_items(cart_checkout_data),
             total_price_validator_based_on,
             channel,
             customer=customer,
@@ -690,7 +694,7 @@ def validate_cart_data(
     else:
         # jeżeli w koszyku nie ma discountów, sprawdź jeszcze czy można dodać te automatyczne "automatic applications" == True
         validated_discounts = validate_discounts(
-            available_data.cart,
+            with_validated_items(available_data.cart),
             total_price_validator_based_on,
             channel,
             customer=customer,

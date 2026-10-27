@@ -2,6 +2,17 @@
 
 ## 10.0.1rc1
 
+### Added
+
+- v2 API (client-visible addition): cart writes name why each rejected discount code was rejected. `_errors` keeps
+  `ONE_OR_MORE_DISCOUNT_INVALID` and adds one detail per rejected code: `field` `codes[i].code`, a v2 code
+  (`DISCOUNT_BLOCKED_BY_EXCLUSIVE_RULE`, `DISCOUNT_EXPIRED`, `DISCOUNT_MIN_ORDER_NOT_MET`, `DISCOUNT_DUPLICATE_RULE`,
+  `DISCOUNT_CODE_NOT_FOUND`, …) and public meta (`code`, plus `blocking_code`, `min_order_amount`, `expired_at`,
+  `active_from` or `currency` by reason). The meta carries no rule internals: no priority, and `blocking_code` only
+  when the client already sees that code (it sent it, or the discount is applied in the cart). Unknown codes,
+  inactive rules and other channels' codes stay `DISCOUNT_CODE_NOT_FOUND`. `CartV2Response` documents `_errors`
+  in OpenAPI. Reference: `docs/api/checkout.md` (v2 cart warnings). v1 responses don't change.
+
 ### Fixed
 
 - An automatic discount rule no longer drops out on every other cart write. A write stores the applied
@@ -9,6 +20,18 @@
   the codes in the cart, so the rule was gone, then back on the write after. The same narrowing dropped automatic
   rules from any cart that carries a discount code. `validate_discounts` now keeps automatic rules whatever codes
   the cart holds.
+- A valid code that loses priority arbitration (an exclusive rule won, or it is exclusive and a higher-priority rule
+  won) is rejected as `blocked_by_exclusive_rule` (v2 `DISCOUNT_BLOCKED_BY_EXCLUSIVE_RULE`) with meta
+  `{code, blocking_code, blocking_priority}`, not as `code_not_found`. `blocking_code` is the code the customer
+  entered for the winning rule, else its first code, or its name for an automatic rule without codes. Since automatic rules take part in arbitration whatever codes the
+  cart holds, a combinable automatic rule with a lower `priority` blocks an exclusive code. Unknown and used-up codes
+  stay `code_not_found`; v1 responses don't change.
+- A second code of a rule already in the cart (or the same code sent twice) is rejected as `duplicate_rule`; it was
+  dropped without a reason, so the cart reported nothing. v1 now lists it under `one_or_more_discount_invalid` too.
+- An exclusive code no longer applies together with automatic rules after a write that sends items (v1 cart PUT,
+  v2 PATCH items). Priority arbitration matches rules against valid cart items, but got the request items, which
+  carry no status yet: no rule matched, none won, and every rule applied. `validate_discounts` now gets the
+  validated items.
 - A price discount adds to the discounts earlier rules already gave an item. The last item of the rule took the
   rest of the amount (for rounding) in place of its whole discount, so e.g. 5 % then 50 off came to 50 off.
 - A split order no longer fails with `TypeError` on every cart: the cart's `payment_method` is a list and was passed

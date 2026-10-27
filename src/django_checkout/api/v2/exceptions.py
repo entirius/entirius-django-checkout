@@ -8,6 +8,7 @@ from pydantic import ValidationError as PydanticValidationError
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.response import Response
 
+from django_checkout.domain.dto.discount import DiscountsRejectedError
 from django_checkout.enums import ItemStatus
 
 
@@ -92,6 +93,8 @@ def map_to_v2_details(messages: list) -> list[dict]:
                     "meta": _build_meta(msg),
                 }
             )
+            if isinstance(msg, DiscountsRejectedError):
+                details.extend(map_discount_errors(msg))
     return details
 
 
@@ -144,59 +147,74 @@ def _normalize_code(code: str) -> str:
     return code.upper().replace(" ", "_").replace("-", "_")
 
 
-def map_discount_errors(discounts: list) -> list[dict]:
-    """Convert ValidatedDiscountData with INVALID status to v2 error details.
+REASON_TO_V2_CODE = {
+    "code_not_found": "DISCOUNT_CODE_NOT_FOUND",
+    "duplicate_rule": "DISCOUNT_DUPLICATE_RULE",
+    "currency_not_supported": "DISCOUNT_CURRENCY_NOT_SUPPORTED",
+    "blocked_by_price_rules": "DISCOUNT_BLOCKED_BY_PRICE_RULES",
+    "expired": "DISCOUNT_EXPIRED",
+    "not_yet_active": "DISCOUNT_NOT_YET_ACTIVE",
+    "usage_limit_reached": "DISCOUNT_USAGE_LIMIT_REACHED",
+    "per_user_limit_reached": "DISCOUNT_PER_USER_LIMIT_REACHED",
+    "wrong_channel": "DISCOUNT_WRONG_CHANNEL",
+    "min_order_not_met": "DISCOUNT_MIN_ORDER_NOT_MET",
+    "login_required": "DISCOUNT_LOGIN_REQUIRED",
+    "first_order_only": "DISCOUNT_FIRST_ORDER_ONLY",
+    "customer_not_eligible": "DISCOUNT_CUSTOMER_NOT_ELIGIBLE",
+    "no_eligible_products": "DISCOUNT_NO_ELIGIBLE_PRODUCTS",
+    "blocked_by_exclusive_rule": "DISCOUNT_BLOCKED_BY_EXCLUSIVE_RULE",
+    "gratis_sku_not_allowed": "GRATIS_SKU_NOT_ALLOWED",
+    "gratis_qty_exceeded": "GRATIS_QTY_EXCEEDED",
+    "gratis_qty_invalid": "GRATIS_QTY_INVALID",
+    "gratis_tier_not_reached": "GRATIS_TIER_NOT_REACHED",
+    "gratis_required_skus_missing": "GRATIS_REQUIRED_SKUS_MISSING",
+    "gratis_no_thresholds": "GRATIS_NO_THRESHOLDS_FOR_CURRENCY",
+    "gratis_no_eligible_products": "GRATIS_NO_ELIGIBLE_PRODUCTS",
+}
 
-    Reads rejection_reason directly when available (set by validators/discounts.py).
-    Falls back to generic DISCOUNT_CODE_INVALID for unmapped cases.
+# Meta keys a client may see. The domain meta also carries rule internals (``blocking_priority``, ``reason``).
+_PUBLIC_META_KEYS = frozenset({"code", "currency", "expired_at", "active_from", "min_order_amount"})
+
+
+def map_discount_errors(error: DiscountsRejectedError) -> list[dict]:
+    """One v2 detail per rejected code: the reason as a v2 code, the code's place in ``codes[]``, public meta.
+
+    A rejection without a reason (the discount worker invalidated it) maps to ``DISCOUNT_CODE_INVALID``.
+    The message stays generic; the frontend words the reason from ``code``.
     """
-    REASON_TO_V2_CODE = {
-        "code_not_found": "DISCOUNT_CODE_NOT_FOUND",
-        "duplicate_rule": "DISCOUNT_DUPLICATE_RULE",
-        "currency_not_supported": "DISCOUNT_CURRENCY_NOT_SUPPORTED",
-        "blocked_by_price_rules": "DISCOUNT_BLOCKED_BY_PRICE_RULES",
-        "expired": "DISCOUNT_EXPIRED",
-        "not_yet_active": "DISCOUNT_NOT_YET_ACTIVE",
-        "usage_limit_reached": "DISCOUNT_USAGE_LIMIT_REACHED",
-        "per_user_limit_reached": "DISCOUNT_PER_USER_LIMIT_REACHED",
-        "wrong_channel": "DISCOUNT_WRONG_CHANNEL",
-        "min_order_not_met": "DISCOUNT_MIN_ORDER_NOT_MET",
-        "login_required": "DISCOUNT_LOGIN_REQUIRED",
-        "first_order_only": "DISCOUNT_FIRST_ORDER_ONLY",
-        "customer_not_eligible": "DISCOUNT_CUSTOMER_NOT_ELIGIBLE",
-        "no_eligible_products": "DISCOUNT_NO_ELIGIBLE_PRODUCTS",
-        "blocked_by_exclusive_rule": "DISCOUNT_BLOCKED_BY_EXCLUSIVE_RULE",
-        "gratis_sku_not_allowed": "GRATIS_SKU_NOT_ALLOWED",
-        "gratis_qty_exceeded": "GRATIS_QTY_EXCEEDED",
-        "gratis_qty_invalid": "GRATIS_QTY_INVALID",
-        "gratis_tier_not_reached": "GRATIS_TIER_NOT_REACHED",
-        "gratis_required_skus_missing": "GRATIS_REQUIRED_SKUS_MISSING",
-        "gratis_no_thresholds": "GRATIS_NO_THRESHOLDS_FOR_CURRENCY",
-        "gratis_no_eligible_products": "GRATIS_NO_ELIGIBLE_PRODUCTS",
-    }
-    details = []
-    for i, entry in enumerate(discounts):
-        discount_data = entry[0] if isinstance(entry, tuple) else entry
-        if not hasattr(discount_data, "status"):
-            continue
-        if discount_data.status == ItemStatus.VALID:
-            continue
+    visible_codes = {*error.sent_codes, *error.applied_codes}
+    positions = _code_positions(error.sent_codes, [discount.code for discount in error.rejected])
+    return [
+        {
+            "scope": "discounts",
+            "field": f"codes[{position}].code" if position is not None else None,
+            "code": REASON_TO_V2_CODE.get(discount.rejection_reason, "DISCOUNT_CODE_INVALID"),
+            "message": "Discount code is invalid.",
+            "meta": _public_discount_meta(discount, visible_codes),
+        }
+        for discount, position in zip(error.rejected, positions, strict=True)
+    ]
 
-        reason = getattr(discount_data, "rejection_reason", None)
-        meta = getattr(discount_data, "rejection_meta", None)
-        v2_code = REASON_TO_V2_CODE.get(reason, "DISCOUNT_CODE_INVALID") if reason else "DISCOUNT_CODE_INVALID"
 
-        details.append(
-            {
-                "scope": "discounts",
-                "field": f"codes[{i}].code",
-                "code": v2_code,
-                # SECURITY: don't reveal why code is invalid to public API (prevents enumeration)
-                "message": "Discount code is invalid.",
-                "meta": meta or {"code": discount_data.code},
-            }
-        )
-    return details
+def _code_positions(sent_codes: list[str], rejected_codes: list[str]) -> list[int | None]:
+    """Index in ``sent_codes`` of each rejected code.
+
+    Of a code sent twice the first copy is the one that applies, so the rejections take its last copies.
+    """
+    slots = {}
+    for code in set(rejected_codes):
+        sent_at = [i for i, sent in enumerate(sent_codes) if sent == code]
+        slots[code] = iter(sent_at[-rejected_codes.count(code) :])
+    return [next(slots[code], None) for code in rejected_codes]
+
+
+def _public_discount_meta(discount, visible_codes: set[str]) -> dict:
+    """``blocking_code`` only when the client already sees it: a code it sent or a discount applied in this cart."""
+    meta = discount.rejection_meta or {}
+    public = {"code": discount.code, **{key: value for key, value in meta.items() if key in _PUBLIC_META_KEYS}}
+    if meta.get("blocking_code") in visible_codes:
+        public["blocking_code"] = meta["blocking_code"]
+    return public
 
 
 def _build_meta(msg) -> dict | None:
