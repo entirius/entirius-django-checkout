@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -245,6 +246,25 @@ class GratisInfoResponse(BaseModel):
     rules: list[dict] = Field(default_factory=list, description="Available gratis rules (always array)")
 
 
+class CartErrorDetail(BaseModel):
+    """A warning about one part of the cart. The write itself succeeded (HTTP 200/201)."""
+
+    scope: str = Field(description="Cart part the warning is about", examples=["discounts"])
+    field: str | None = Field(None, description="Path of the input it is about", examples=["codes[1].code"])
+    code: str = Field(
+        description="Machine-readable code, e.g. ITEM_OUT_OF_STOCK. Rejected discount codes give "
+        "ONE_OR_MORE_DISCOUNT_INVALID plus one DISCOUNT_* / GRATIS_* detail per code",
+        examples=["DISCOUNT_BLOCKED_BY_EXCLUSIVE_RULE"],
+    )
+    message: str = Field(description="Generic English text; word the reason from `code`")
+    meta: dict[str, Any] | None = Field(
+        None,
+        description="Per rejected code: `code`, plus by reason `blocking_code`, `min_order_amount`, `expired_at`, "
+        "`active_from`, `currency`",
+        examples=[{"code": "PERCENT10", "blocking_code": "PRIORITY5"}],
+    )
+
+
 class CartV2Response(BaseModel):
     """Full v2 cart response — explicit gross/net, string amounts, decimal tax_rate."""
 
@@ -297,6 +317,11 @@ class CartV2Response(BaseModel):
     can_be_split: bool = Field(False, description="Whether order will be split")
     allowed_guest_checkout: bool = Field(True, description="Guest checkout allowed")
     need_full_address: bool = Field(True, description="Full address required")
+
+    # Warnings of the write; set by the response builder, absent when there are none
+    errors: list[CartErrorDetail] | None = Field(
+        None, serialization_alias="_errors", description="Warnings of this write; the key is absent when there are none"
+    )
 
     @classmethod
     def from_domain(cls, checkout_data, cart_id: str, cart_status: str, **extra) -> CartV2Response:

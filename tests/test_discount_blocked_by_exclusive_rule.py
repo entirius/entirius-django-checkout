@@ -15,7 +15,7 @@ import pytest
 
 from django_checkout.api.v2.exceptions import map_discount_errors
 from django_checkout.domain.dto.cart import CartData
-from django_checkout.domain.dto.discount import DiscountData
+from django_checkout.domain.dto.discount import DiscountData, DiscountsRejectedError
 from django_checkout.domain.validators.discounts import validate_discounts
 from django_checkout.enums import ItemStatus
 from django_checkout.models import DiscountCode, DiscountRuleCode
@@ -94,15 +94,18 @@ def test_unknown_code_next_to_arbitration_stays_not_found(channel):
 
 
 @pytest.mark.django_db
-def test_blocked_code_maps_to_v2_error_with_meta(channel):
+def test_blocked_code_maps_to_v2_error_without_the_priority(channel):
     make_rule(channel, "AUTO_5", priority=5, combinable=True, automatic=True)
     make_rule(channel, "EXCLUSIVE", priority=10, combinable=False, code="EXCL10")
+    validated = [discount for discount, _ in validate_discounts(cart_with("EXCL10"), TOTAL, channel)]
+    error = DiscountsRejectedError(
+        message="Some discounts are invalid",
+        code="one_or_more_discount_invalid",
+        rejected=[d for d in validated if d.status == ItemStatus.INVALID],
+        sent_codes=["EXCL10"],
+        applied_codes=[d.code for d in validated if d.status == ItemStatus.VALID],
+    )
 
-    errors = map_discount_errors(validate_discounts(cart_with("EXCL10"), TOTAL, channel))
-
-    assert [(e["code"], e["meta"]) for e in errors] == [
-        (
-            "DISCOUNT_BLOCKED_BY_EXCLUSIVE_RULE",
-            {"code": "EXCL10", "blocking_code": "AUTO_5", "blocking_priority": 5},
-        )
+    assert [(e["field"], e["code"], e["meta"]) for e in map_discount_errors(error)] == [
+        ("codes[0].code", "DISCOUNT_BLOCKED_BY_EXCLUSIVE_RULE", {"code": "EXCL10", "blocking_code": "AUTO_5"})
     ]

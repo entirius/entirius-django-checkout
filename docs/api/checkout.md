@@ -1930,3 +1930,42 @@ Sub-resource PATCH pattern. Each PATCH sends one concern, returns full cart.
 | GET | `/api/checkout/v2/{channel}/orders/` | List orders |
 
 v2 price fields use explicit gross/net naming (aligned with Matrix v2).
+
+### v2 cart warnings (`_errors`)
+
+A cart write (create, PATCH items / addresses / discounts / shipping / payment, merge) answers 200/201 with the full
+cart; what went wrong in it is listed under `_errors` (the key is absent when nothing did). Each detail is
+`{scope, field, code, message, meta}`; branch on `code`, `message` is generic English text. Reads (GET) carry no
+`_errors`, and `POST orders/` does not report discount codes: a rejected code is simply not in the order.
+
+Rejected discount codes give `ONE_OR_MORE_DISCOUNT_INVALID` (`field: "cart.discounts.code"`, as before) and then one
+detail per rejected code. `field` is `codes[i].code`, `i` being the code's place among the codes sent (the
+`codes` of a discounts PATCH, else the codes the cart already holds).
+
+```json
+"_errors": [
+  {"scope": "discounts", "field": "cart.discounts.code", "code": "ONE_OR_MORE_DISCOUNT_INVALID",
+   "message": "Some discounts are invalid", "meta": null},
+  {"scope": "discounts", "field": "codes[1].code", "code": "DISCOUNT_BLOCKED_BY_EXCLUSIVE_RULE",
+   "message": "Discount code is invalid.", "meta": {"code": "PERCENT10", "blocking_code": "PRIORITY5"}}
+]
+```
+
+| `code` | When | `meta` besides `code` |
+|---|---|---|
+| `DISCOUNT_CODE_NOT_FOUND` | unknown code, inactive rule, another channel's code, or a rule that excludes this customer / cart quantity | — |
+| `DISCOUNT_EXPIRED` | code's `active_to` passed | `expired_at` (ISO date) |
+| `DISCOUNT_NOT_YET_ACTIVE` | code's `active_from` ahead | `active_from` (ISO date) |
+| `DISCOUNT_USAGE_LIMIT_REACHED` | `current_used` reached `max_used` | — |
+| `DISCOUNT_PER_USER_LIMIT_REACHED` | this email used it `max_uses_per_user` times | — |
+| `DISCOUNT_MIN_ORDER_NOT_MET` | cart total below the rule's `min_order_amount` | `min_order_amount` |
+| `DISCOUNT_LOGIN_REQUIRED` | first-order-for-logged-in rule, guest cart | — |
+| `DISCOUNT_FIRST_ORDER_ONLY` | first-order rule, the email has orders | — |
+| `DISCOUNT_CURRENCY_NOT_SUPPORTED` | the rule has no value for the cart currency | `currency` |
+| `DISCOUNT_DUPLICATE_RULE` | another code of the same rule (or the same code) is already in the cart | — |
+| `DISCOUNT_BLOCKED_BY_EXCLUSIVE_RULE` | a higher-priority rule won arbitration (it or this code is exclusive) | `blocking_code`, only when the client already sees it: a code it sent or a discount applied in this cart |
+| `DISCOUNT_BLOCKED_BY_PRICE_RULES` | the price list allows no discount codes | — |
+| `DISCOUNT_CODE_INVALID` | rejected while the discount was calculated (no eligible products, gratis checks) | — |
+
+The meta never carries rule internals (priority, ids, usage counters). v1 responses are unchanged: v1 still gets
+only `one_or_more_discount_invalid` with `affected_values`.

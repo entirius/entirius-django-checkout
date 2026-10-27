@@ -2,6 +2,9 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+from dataclasses import dataclass
+from datetime import date
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from django.db.models import BooleanField, Exists, F, OuterRef, Q, Value
@@ -135,6 +138,67 @@ def rule_label(rule: DiscountRuleCode, cart_codes: list[str]) -> str:
     codes = [dc.code for dc in rule.codes.all()]
     entered = next((code for code in codes if code in cart_codes), None)
     return entered or (codes[0] if codes else rule.name)
+
+
+@dataclass(frozen=True)
+class CodeEligibility:
+    """What a rejected code is checked against to name why it was rejected."""
+
+    channel: "Channel | None"
+    total_price: Decimal
+    today: date
+    is_logged: bool
+    has_previous_order: bool
+    uses_by_code: dict[str, int]
+
+
+def diagnose_rejected_code(code: str, eligibility: CodeEligibility) -> tuple[str, dict]:
+    """Why a code the customer entered applies to nothing: ``(rejection_reason, rejection_meta)``.
+
+    Only for codes that exist in this channel on an active, non-automatic rule; anything else (unknown, inactive,
+    another channel's code) stays ``code_not_found``, so the reason never tells a shop about other shops' codes.
+    Checks run in a fixed order and the first that fails names the reason; customer filters and the
+    ``max_products_qty`` threshold are not told apart and stay ``code_not_found``.
+    """
+    codes = DiscountCode.objects.select_related("rule").filter(
+        code=code, rule__is_active=True, rule__automatic_applications=False
+    )
+    if eligibility.channel is not None:
+        codes = codes.filter(rule__channels=eligibility.channel)
+    discount_code = codes.order_by("pk").first()
+    reason, meta = _first_failed_check(discount_code, eligibility) if discount_code else ("code_not_found", {})
+    return reason, {"code": code, **meta}
+
+
+def _first_failed_check(discount_code: DiscountCode, eligibility: CodeEligibility) -> tuple[str, dict]:
+    return (
+        _code_check(discount_code, eligibility)
+        or _rule_check(discount_code.rule, eligibility)
+        or ("code_not_found", {})
+    )
+
+
+def _code_check(discount_code: DiscountCode, eligibility: CodeEligibility) -> tuple[str, dict] | None:
+    if discount_code.active_to and discount_code.active_to < eligibility.today:
+        return "expired", {"expired_at": discount_code.active_to.isoformat()}
+    if discount_code.active_from and discount_code.active_from > eligibility.today:
+        return "not_yet_active", {"active_from": discount_code.active_from.isoformat()}
+    if discount_code.current_used >= discount_code.max_used:
+        return "usage_limit_reached", {}
+    per_user = discount_code.max_uses_per_user
+    if per_user is not None and eligibility.uses_by_code.get(discount_code.code, 0) >= per_user:
+        return "per_user_limit_reached", {}
+    return None
+
+
+def _rule_check(rule: DiscountRuleCode, eligibility: CodeEligibility) -> tuple[str, dict] | None:
+    if rule.min_order_amount > eligibility.total_price:
+        return "min_order_not_met", {"min_order_amount": str(rule.min_order_amount)}
+    if rule.target == TargetForDiscountRule.FIRST_ORDER_LOGGED and not eligibility.is_logged:
+        return "login_required", {}
+    if rule.target != TargetForDiscountRule.ALL and eligibility.has_previous_order:
+        return "first_order_only", {}
+    return None
 
 
 def is_currency_supported_by_discount(extra_value, currency_code):
@@ -335,6 +399,14 @@ def validate_discounts(
     rules_calc_pk = []
 
     if discounts:
+        eligibility = CodeEligibility(
+            channel=channel,
+            total_price=total_price,
+            today=current_date,
+            is_logged=is_logged,
+            has_previous_order=have_previous_order_by_email,
+            uses_by_code=how_many_orders_user_with_discount_code_exists,
+        )
         all_discount_codes = list(
             DiscountCode.objects.select_related("rule")
             .filter(rule__in=query, *code_filters)
@@ -358,17 +430,15 @@ def validate_discounts(
         for discount in discounts:
             if getattr(discount, "is_automatic", False):
                 continue
-            discount_codes = DiscountCode.objects.select_related("rule").filter(
-                rule__in=query, *code_filters, current_used__lt=F("max_used")
-            )
-
             if discount.code in valid_codes and not getattr(discount, "is_automatic", False):
                 dc = rules_by_code.get(discount.code)
 
                 if dc.pk in rules_calc_pk:
-                    factor_invalid_discount(
-                        rejection_reason="duplicate_rule",
-                        rejection_meta={"code": discount.code},
+                    discount_validated.append(
+                        factor_invalid_discount(
+                            rejection_reason="duplicate_rule",
+                            rejection_meta={"code": discount.code},
+                        )
                     )
                     continue
 
@@ -411,12 +481,7 @@ def validate_discounts(
                     )
                 )
             else:
-                discount_validated.append(
-                    factor_invalid_discount(
-                        rejection_reason="code_not_found",
-                        rejection_meta={"code": discount.code},
-                    )
-                )
+                discount_validated.append(factor_invalid_discount(*diagnose_rejected_code(discount.code, eligibility)))
 
     for qa in query_automatic:
         if not is_currency_supported_by_discount(qa.extra_value, currency):
