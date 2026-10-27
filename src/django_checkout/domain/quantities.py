@@ -2,6 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 from django.db.models import Case, IntegerField, Value, When
@@ -213,3 +214,10 @@ def fetch_quantities(sku_list: list[str], channel: "Channel", customer: "Custome
             quantity_grouped_by_sku[sku] = {k: v for k, v in elem.items() if k != "product__sku"}
 
     return quantity_grouped_by_sku
+
+
+def filter_saleable_skus(sku_list: Iterable[str], channel: "Channel", customer: "Customer" = None) -> list[str]:
+    """SKUs from sku_list that are in stock. A missing Stock row means not saleable."""
+    skus = list(sku_list)
+    quantities = fetch_quantities(skus, channel, customer)
+    return [sku for sku in skus if quantities.get(sku, {}).get("is_saleable")]

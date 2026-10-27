@@ -46,6 +46,7 @@ def reevaluate_customs_threshold(
     msg: list,
     channel: Any,
     currency: str,
+    customer: Any = None,
 ) -> tuple[CartData, str | None, list, list, list]:
     """
     Check post-discount prices against customs threshold.
@@ -124,6 +125,7 @@ def reevaluate_customs_threshold(
                 channel=channel,
                 discount_idx=idx,
                 currency_code=currency,
+                customer=customer,
             )
             if not gratis:
                 cart.discounts[idx].status = ItemStatus.INVALID

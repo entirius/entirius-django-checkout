@@ -1,5 +1,59 @@
 # Changelog
 
+## 10.0.1 — 2026-10-27
+
+### Added
+
+- v2 API (client-visible addition): cart writes name why each rejected discount code was rejected. `_errors` keeps
+  `ONE_OR_MORE_DISCOUNT_INVALID` and adds one detail per rejected code: `field` `codes[i].code`, a v2 code
+  (`DISCOUNT_BLOCKED_BY_EXCLUSIVE_RULE`, `DISCOUNT_EXPIRED`, `DISCOUNT_MIN_ORDER_NOT_MET`, `DISCOUNT_DUPLICATE_RULE`,
+  `DISCOUNT_CODE_NOT_FOUND`, …) and public meta (`code`, plus `blocking_code`, `min_order_amount`, `expired_at`,
+  `active_from` or `currency` by reason). The meta carries no rule internals: no priority, and `blocking_code` only
+  when the client already sees that code (it sent it, or the discount is applied in the cart). Unknown codes,
+  inactive rules and other channels' codes stay `DISCOUNT_CODE_NOT_FOUND`. `CartV2Response` documents `_errors`
+  in OpenAPI. Reference: `docs/api/checkout.md` (v2 cart warnings). v1 responses don't change.
+
+### Fixed
+
+- An automatic discount rule no longer drops out on every other cart write. A write stores the applied
+  automatic discount in the cart (a rule without codes under its name), and the next write narrowed the rules to
+  the codes in the cart, so the rule was gone, then back on the write after. The same narrowing dropped automatic
+  rules from any cart that carries a discount code. `validate_discounts` now keeps automatic rules whatever codes
+  the cart holds.
+- A valid code that loses priority arbitration (an exclusive rule won, or it is exclusive and a higher-priority rule
+  won) is rejected as `blocked_by_exclusive_rule` (v2 `DISCOUNT_BLOCKED_BY_EXCLUSIVE_RULE`), not as
+  `code_not_found`; the internal error meta is `{code, blocking_code, blocking_priority}`, v2 shows `code` and
+  `blocking_code` only. `blocking_code` is the code the customer
+  entered for the winning rule, else its first code, or its name for an automatic rule without codes. Since automatic rules take part in arbitration whatever codes the
+  cart holds, a combinable automatic rule with a lower `priority` blocks an exclusive code. Unknown and used-up codes
+  stay `code_not_found`; v1 responses don't change.
+- A second code of a rule already in the cart (or the same code sent twice) is rejected as `duplicate_rule`; it was
+  dropped without a reason, so the cart reported nothing. v1 now lists it under `one_or_more_discount_invalid` too.
+- An exclusive code no longer applies together with automatic rules after a write that sends items (v1 cart PUT,
+  v2 PATCH items). Priority arbitration matches rules against valid cart items, but got the request items, which
+  carry no status yet: no rule matched, none won, and every rule applied. `validate_discounts` now gets the
+  validated items.
+- A price discount adds to the discounts earlier rules already gave an item. The last item of the rule took the
+  rest of the amount (for rounding) in place of its whole discount, so e.g. 5 % then 50 off came to 50 off.
+- A split order no longer fails with `TypeError` on every cart: the cart's `payment_method` is a list and was passed
+  to `asdict()` whole. Each part is created against the settling method, the first non-voucher one (a voucher alone:
+  the voucher).
+- The `voucher_insufficient_balance` error names why a voucher was refused (expired, unknown code, wrong PIN):
+  `extra.voucher_errors` lists `{code, message}` per rejection and the message carries them, next to the amounts
+  already in `extra`. Needs a voucher provider that returns `ErrorInfo` from `attach_to_cart` (django-checkout-voucher
+  1.2.1); a provider returning plain strings keeps the old wording. `BasePaymentProvider.attach_to_cart` may now
+  return `ErrorInfo` next to strings; existing providers need no change.
+- An out-of-stock gratis is no longer offered nor accepted (it reached the cart as `OUT_OF_STOCK` and blocked checkout);
+  stock is read for the customer, so a customer's own supplier counts. A gratis SKU without a stock row counts as out
+  of stock, as for cart items.
+- Two orders of one channel placed at the same moment no longer collide on their number: `in_channel_id` was
+  `MAX + 1` read without a lock, so both read the same value and the second insert failed on
+  `in_channel_id_unique_per_channel` (a 500 on order creation). The insert now runs in a savepoint and, on that
+  collision only, reads the next number and tries again (up to 5 times); any other `IntegrityError` is raised as
+  before. Nothing is locked: the payment gateway is called inside the order's transaction, so a channel lock would
+  queue every order of the channel behind it. On a collision the second insert waits until the first order's
+  transaction ends.
+
 ## 10.0.0 — 2026-10-12
 
 - Access: the module declares its own access areas on its AppConfig and its admin views (copied from the
