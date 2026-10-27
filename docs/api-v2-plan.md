@@ -1296,6 +1296,14 @@ Items still carry `status` field in cart response (backward compat). But errors 
 Complete catalog of every discount failure path in v1 domain logic, mapped to v2 error codes.
 Source files: `validators/discounts.py`, `worker/discount_worker.py`, `validators/cart.py`.
 
+**Status (10.0.1):** implemented for v2 cart writes, documented as current behaviour in
+[`api/checkout.md`](api/checkout.md#v2-cart-warnings-_errors) — that page wins where it differs from the tables
+below. Reported today: rows 1, 3-6, 8-10, 13-16; row 2 (inactive rule), 7 (wrong channel), 11 (customer filter) and
+12 (qty threshold) report `DISCOUNT_CODE_NOT_FOUND` so a code's existence elsewhere never leaks; phases 4-6 (worker)
+report `DISCOUNT_CODE_INVALID`. Public meta is narrower than the tables: no `blocking_priority`, `max_used`,
+`current_used`, `channel_idx`, `current_total` or `{reason: "price_tuner"}`; `blocking_code` only when the client
+already sees that code.
+
 ### Phase 1: Code Lookup & Activation (validators/discounts.py)
 
 These checks happen in `validate_discounts()` before any calculation.

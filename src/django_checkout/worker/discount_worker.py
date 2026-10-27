@@ -12,6 +12,7 @@ from django_checkout.domain.dto.cart import CartData
 from django_checkout.domain.dto.discount import DiscountData, GratisRules
 from django_checkout.domain.dto.discount_items import DiscountItems
 from django_checkout.domain.dto.item import GratisData, ValidatedItemData
+from django_checkout.domain.quantities import filter_saleable_skus
 from django_checkout.domain.validators.discounts import validate_discounts
 from django_checkout.enums import ItemStatus
 from django_checkout.models import (
@@ -623,7 +624,7 @@ def calculate_discount_when_price_discount(
         full_discount_price = price_discount
     except TypeError:
         raise Exception(f"Make sure your extra_value for discount.pk = {discount.pk} is valid")
-    discount_amount = discount_amount + (round((full_discount_price * price_percentage), 2))
+    item_share = round((full_discount_price * price_percentage), 2)
 
     valid_non_gratis_items = [
         item
@@ -633,9 +634,11 @@ def calculate_discount_when_price_discount(
 
     # Jeżeli to ostatni element NIE-gratis, przypisuje resztę kwoty discountu by nie było błędu z zaokrągleniem
     if valid_non_gratis_items and current_item == valid_non_gratis_items[-1]:
-        discount_amount = discount_extra_value_rest
+        item_share = discount_extra_value_rest
     else:
-        discount_extra_value_rest -= discount_amount
+        discount_extra_value_rest -= item_share
+    # The item may already carry a discount of an earlier rule: add this rule's share to it.
+    discount_amount = discount_amount + item_share
     cart_data.discounts[discount_idx].price_discount = price_discount
     return cart_data, discount_amount, discount_extra_value_rest
 
@@ -954,7 +957,7 @@ def calculate_discounts_modifiers(
 
 
 def calculate_and_valid_gratis(
-    discount: DiscountRuleCode, cart_data: CartData, channel=None, discount_idx=0, currency_code=None
+    discount: DiscountRuleCode, cart_data: CartData, channel=None, discount_idx=0, currency_code=None, customer=None
 ):
     """Zwraca gratis, jeżeli koszyk się kwalifikuje na podany sku i jego podaną ilość w koszyku"""
     gratis_is_allowed = False
@@ -999,6 +1002,9 @@ def calculate_and_valid_gratis(
     skus_allowed_to_gratis = products_allowed_to_gratis.values_list("real_product__sku", flat=True)
     picked_sku = cart_data.discounts[discount_idx].sku
     picked_quantity = cart_data.discounts[discount_idx].quantity
+    if picked_sku and not filter_saleable_skus([picked_sku], channel, customer):
+        cart_data.discounts[discount_idx].status = ItemStatus.INVALID
+        return None
     if discount.modifier == ModifiersForDiscountRule.GRATIS_BY_SKU_IN_CART:
         gratis_is_allowed = check_is_gratis_allowed(cart_data, discount)
     match discount.modifier:
@@ -1273,7 +1279,9 @@ def get_all_available_gratis_rules(
 
                 if should_show_gratis:
                     products_egible_to_gratis = filter_by_inclusion_and_exclusion(gratis, cart_body, channel)
-                    skus_egible_to_gratis = products_egible_to_gratis.values_list("real_product__sku", flat=True)
+                    skus_egible_to_gratis = filter_saleable_skus(
+                        products_egible_to_gratis.values_list("real_product__sku", flat=True), channel, customer
+                    )
                     if GRATIS_MECHANISM == 2:
                         sku_list_with_price = dict.fromkeys(skus_egible_to_gratis, GRATIS_PRICE)
                     else:

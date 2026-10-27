@@ -9,6 +9,7 @@ from django_pricemanager.output import validate_access_to_price_list
 from django_utils.api.responses import ErrorInfo
 
 from django_checkout.domain.dto.cart import CartRequest, CheckoutData
+from django_checkout.domain.dto.discount import DiscountsRejectedError
 from django_checkout.domain.dto.item import SkuQuantityData
 from django_checkout.domain.prices import calc_fee_of_price
 from django_checkout.domain.validators.address import validate_addresses
@@ -33,6 +34,12 @@ def clear_gratis_discounts(data: CartRequest, checkout_data: CheckoutData):
     if getattr(data.cart, "items", None):
         data.cart.items = [item for item in data.cart.items if not getattr(item, "is_gratis", False)]
     return data, checkout_data
+
+
+def _sent_discount_codes(data: CartRequest, checkout_data: CheckoutData) -> list[str]:
+    """The codes the customer entered, in the order sent: the request's, else the stored cart's."""
+    discounts = getattr(data.cart, "discounts", None) or getattr(checkout_data.cart, "discounts", None) or []
+    return [d.code for d in discounts if d.code and not getattr(d, "is_automatic", False)]
 
 
 def process_cart(
@@ -132,11 +139,13 @@ def process_cart(
     # Provider-specific cart attachment (e.g. voucher pay_code → CartVoucher rows).
     # Runs once per validate cycle, after payment_method validation succeeds.
     # Replaces previous Phase-1 side-effect in validate_vouchers_signal handler.
+    voucher_attach_errors: list = []
     if cart is not None and payment_methods:
         raw_payment_inputs = data.payment_method if data.payment_method else checkout_data.payment_method
         for pm in payment_methods:
-            attach_errors = pm.get_provider().attach_to_cart(cart, payment_data=raw_payment_inputs)
-            messages.extend(attach_errors)
+            voucher_attach_errors.extend(pm.get_provider().attach_to_cart(cart, payment_data=raw_payment_inputs))
+        messages.extend(voucher_attach_errors)
+    sent_codes = _sent_discount_codes(data, checkout_data)  # read first: validate_cart_data rewrites the lists
     validated_cart_data, msg, cart_weight, validated_addresses = validate_cart_data(
         data,
         channel,
@@ -166,8 +175,8 @@ def process_cart(
         discount for discount in validated_cart_data.discounts if discount.status == ValidationStatus.VALID
     ]
 
-    if invalid_discounts := [
-        discount.code
+    if rejected_discounts := [
+        discount
         for discount in before_discounts
         if discount.status == ValidationStatus.INVALID and not discount.is_automatic
     ]:
@@ -175,11 +184,14 @@ def process_cart(
             [*validated_cart_data.items, *validated_cart_data.discounts]
         )
         messages.append(
-            ErrorInfo(
+            DiscountsRejectedError(
                 message="Some discounts are invalid",
                 code="one_or_more_discount_invalid",
-                affected_values=invalid_discounts,
+                affected_values=[discount.code for discount in rejected_discounts],
                 affected_field="cart.discounts.code",
+                rejected=rejected_discounts,
+                sent_codes=sent_codes,
+                applied_codes=[discount.code for discount in validated_cart_data.discounts],
             )
         )
 
@@ -348,20 +360,34 @@ def process_cart(
         if not non_voucher_pm and remaining_to_pay > Decimal("0"):
             voucher_coverage_insufficient = True
             cart_total_before_voucher = voucher_paid + remaining_to_pay
+            rejections = [
+                {"code": e.code, "message": e.message} for e in voucher_attach_errors if isinstance(e, ErrorInfo)
+            ]
+            message = (
+                f"Voucher covers {voucher_paid} {currency} of {cart_total_before_voucher} {currency}. "
+                f"Add another payment method or another voucher to cover the remaining {remaining_to_pay} {currency}."
+            )
+            extra = {
+                "voucher_amount_applied": str(voucher_paid),
+                "cart_total": str(cart_total_before_voucher),
+                "remaining_to_pay": str(remaining_to_pay),
+                "currency_code": currency,
+            }
+            if rejections:
+                reasons = "; ".join(r["message"] for r in rejections)
+                # Another voucher of the cart may still have applied: keep its amount in the wording then.
+                message = (
+                    f"{message} Not applied: {reasons}"
+                    if voucher_paid > 0
+                    else f"No voucher could be applied: {reasons}"
+                )
+                extra["voucher_errors"] = rejections
             messages.append(
                 ErrorInfo(
                     code="voucher_insufficient_balance",
-                    message=(
-                        f"Voucher covers {voucher_paid} {currency} of {cart_total_before_voucher} {currency}. "
-                        f"Add another payment method or another voucher to cover the remaining {remaining_to_pay} {currency}."
-                    ),
+                    message=message,
                     affected_field="cart.payment_method",
-                    extra={
-                        "voucher_amount_applied": str(voucher_paid),
-                        "cart_total": str(cart_total_before_voucher),
-                        "remaining_to_pay": str(remaining_to_pay),
-                        "currency_code": currency,
-                    },
+                    extra=extra,
                 )
             )
         elif non_voucher_pm and voucher_paid > Decimal("0") and remaining_to_pay <= Decimal("0"):
