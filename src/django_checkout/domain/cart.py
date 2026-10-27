@@ -37,7 +37,7 @@ def clear_gratis_discounts(data: CartRequest, checkout_data: CheckoutData):
 
 
 def _sent_discount_codes(data: CartRequest, checkout_data: CheckoutData) -> list[str]:
-    """The codes the customer entered, in the order sent: the request's, else the stored cart's (as validated)."""
+    """The codes the customer entered, in the order sent: the request's, else the stored cart's."""
     discounts = getattr(data.cart, "discounts", None) or getattr(checkout_data.cart, "discounts", None) or []
     return [d.code for d in discounts if d.code and not getattr(d, "is_automatic", False)]
 
@@ -145,6 +145,7 @@ def process_cart(
         for pm in payment_methods:
             voucher_attach_errors.extend(pm.get_provider().attach_to_cart(cart, payment_data=raw_payment_inputs))
         messages.extend(voucher_attach_errors)
+    sent_codes = _sent_discount_codes(data, checkout_data)  # read first: validate_cart_data rewrites the lists
     validated_cart_data, msg, cart_weight, validated_addresses = validate_cart_data(
         data,
         channel,
@@ -189,7 +190,7 @@ def process_cart(
                 affected_values=[discount.code for discount in rejected_discounts],
                 affected_field="cart.discounts.code",
                 rejected=rejected_discounts,
-                sent_codes=_sent_discount_codes(data, checkout_data),
+                sent_codes=sent_codes,
                 applied_codes=[discount.code for discount in validated_cart_data.discounts],
             )
         )

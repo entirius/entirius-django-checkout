@@ -26,6 +26,8 @@ from tests.test_gratis_stock import (  # noqa: F401 - fixtures
     TRIGGER_SKU,
     catalog,
     coffee_in_stock,
+    gratis_code,
+    gratis_rule,
     pim_channel,
     priced_catalog,
     supplier,
@@ -151,6 +153,15 @@ def test_unknown_code_and_another_channels_code_are_not_found(channel, other_cha
     assert per_code(send_codes("NO_SUCH_CODE", "ELSEWHERE10")) == [
         ("codes[0].code", "DISCOUNT_CODE_NOT_FOUND", {"code": "NO_SUCH_CODE"}),
         ("codes[1].code", "DISCOUNT_CODE_NOT_FOUND", {"code": "ELSEWHERE10"}),
+    ]
+
+
+@pytest.mark.django_db
+@pytest.mark.usefixtures("gratis_code")
+def test_place_counts_only_the_codes_sent_when_a_gratis_code_exists(send_codes):
+    """The gratis probe puts each gratis code ahead of the cart's codes while the cart is validated."""
+    assert per_code(send_codes("NO_SUCH_CODE")) == [
+        ("codes[0].code", "DISCOUNT_CODE_NOT_FOUND", {"code": "NO_SUCH_CODE"})
     ]
 
 
