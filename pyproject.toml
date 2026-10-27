@@ -1,6 +1,6 @@
 [project]
 name = "entirius-django-checkout"
-version = "10.0.0"
+version = "10.0.1rc1"
 description = "Checkout engine for Entirius: carts, orders, payment gateways, shipping, discounts and sale offers"
 keywords = ["django", "checkout", "cart", "orders", "payments", "ecommerce", "entirius"]
 classifiers = [

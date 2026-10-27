@@ -225,7 +225,11 @@ def validate_discounts(
 
     if discounts:
         discount_codes = [discount.code for discount in discounts]
-        base_query = base_query.filter(Q(codes__code__in=discount_codes) & is_active_from & is_active_to)
+        # Automatic rules stay in: a write stores the applied automatic discount in the cart (a rule
+        # without codes under its name) and the next write must not drop the rule for matching no code.
+        base_query = base_query.filter(
+            (Q(codes__code__in=discount_codes) & is_active_from & is_active_to) | Q(automatic_applications=True)
+        )
 
     base_query = (
         base_query.annotate(

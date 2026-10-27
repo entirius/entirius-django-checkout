@@ -1,9 +1,27 @@
 # Changelog
 
-## Unreleased
+## 10.0.1rc1
 
 ### Fixed
 
+- An automatic discount rule no longer drops out on every other cart write. A write stores the applied
+  automatic discount in the cart (a rule without codes under its name), and the next write narrowed the rules to
+  the codes in the cart, so the rule was gone, then back on the write after. The same narrowing dropped automatic
+  rules from any cart that carries a discount code. `validate_discounts` now keeps automatic rules whatever codes
+  the cart holds.
+- A price discount adds to the discounts earlier rules already gave an item. The last item of the rule took the
+  rest of the amount (for rounding) in place of its whole discount, so e.g. 5 % then 50 off came to 50 off.
+- A split order no longer fails with `TypeError` on every cart: the cart's `payment_method` is a list and was passed
+  to `asdict()` whole. Each part is created against the settling method, the first non-voucher one (a voucher alone:
+  the voucher).
+- The `voucher_insufficient_balance` error names why a voucher was refused (expired, unknown code, wrong PIN):
+  `extra.voucher_errors` lists `{code, message}` per rejection and the message carries them, next to the amounts
+  already in `extra`. Needs a voucher provider that returns `ErrorInfo` from `attach_to_cart` (django-checkout-voucher
+  1.2.1); a provider returning plain strings keeps the old wording. `BasePaymentProvider.attach_to_cart` may now
+  return `ErrorInfo` next to strings; existing providers need no change.
+- An out-of-stock gratis is no longer offered nor accepted (it reached the cart as `OUT_OF_STOCK` and blocked checkout);
+  stock is read for the customer, so a customer's own supplier counts. A gratis SKU without a stock row counts as out
+  of stock, as for cart items.
 - Two orders of one channel placed at the same moment no longer collide on their number: `in_channel_id` was
   `MAX + 1` read without a lock, so both read the same value and the second insert failed on
   `in_channel_id_unique_per_channel` (a 500 on order creation). The channel row is locked
