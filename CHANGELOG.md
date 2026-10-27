@@ -21,8 +21,9 @@
   rules from any cart that carries a discount code. `validate_discounts` now keeps automatic rules whatever codes
   the cart holds.
 - A valid code that loses priority arbitration (an exclusive rule won, or it is exclusive and a higher-priority rule
-  won) is rejected as `blocked_by_exclusive_rule` (v2 `DISCOUNT_BLOCKED_BY_EXCLUSIVE_RULE`) with meta
-  `{code, blocking_code, blocking_priority}`, not as `code_not_found`. `blocking_code` is the code the customer
+  won) is rejected as `blocked_by_exclusive_rule` (v2 `DISCOUNT_BLOCKED_BY_EXCLUSIVE_RULE`), not as
+  `code_not_found`; the internal error meta is `{code, blocking_code, blocking_priority}`, v2 shows `code` and
+  `blocking_code` only. `blocking_code` is the code the customer
   entered for the winning rule, else its first code, or its name for an automatic rule without codes. Since automatic rules take part in arbitration whatever codes the
   cart holds, a combinable automatic rule with a lower `priority` blocks an exclusive code. Unknown and used-up codes
   stay `code_not_found`; v1 responses don't change.
