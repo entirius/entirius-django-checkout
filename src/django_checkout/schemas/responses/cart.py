@@ -393,7 +393,7 @@ class CartV2Response(BaseModel):
                 is_available=getattr(cart, "is_gratis_available", False) or False,
                 nearest_tier_price=format_money(getattr(cart, "amount_required_for_nearest_gratis_rule", None)),
                 amount_missing=format_money(getattr(cart, "amount_missing_for_nearest_gratis_rule", None)),
-                rules=getattr(cart, "gratis_rules", None) or [],
+                rules=getattr(cart, "available_gratis_rules", None) or [],
             )
 
         return cls(
