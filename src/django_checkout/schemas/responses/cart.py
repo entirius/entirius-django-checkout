@@ -358,10 +358,13 @@ class CartV2Response(BaseModel):
                     discounts.append(DiscountResponse.from_domain(d))
 
         # Compute net totals from gross
-        base_total = Decimal(str(checkout_data.base_total)) if checkout_data.base_total else Decimal("0")
+        # The subtotal is the items alone: `base_total` and `total_tax` also hold shipping and the payment fee.
+        items_total = cart.base_total_price if cart and cart.base_total_price is not None else checkout_data.base_total
+        subtotal_gross = Decimal(str(items_total)) if items_total else Decimal("0")
+        items_tax = Decimal(str(cart.tax_amount)) if cart and cart.tax_amount else Decimal("0")
         total = Decimal(str(checkout_data.total)) if checkout_data.total else Decimal("0")
         total_tax = Decimal(str(checkout_data.total_tax)) if checkout_data.total_tax else Decimal("0")
-        subtotal_net = base_total - total_tax if total_tax else None
+        subtotal_net = subtotal_gross - items_tax if items_tax else None
         total_net = total - total_tax if total_tax else None
 
         # Discount totals
@@ -405,7 +408,7 @@ class CartV2Response(BaseModel):
                 else str(checkout_data.validation_status)
             ),
             currency=checkout_data.currency_code,
-            subtotal_gross=format_money(base_total),
+            subtotal_gross=format_money(subtotal_gross),
             subtotal_net=format_money(subtotal_net),
             total_gross=format_money(total),
             total_net=format_money(total_net),
