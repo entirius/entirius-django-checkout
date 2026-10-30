@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- v2 API (client-visible): `gratis.rules` of a cart lists the gift rules, as `GET carts/{id}/gratis-rules/` does. It was
+  read from `gratis_rules`, a legacy field nothing fills, so it stayed empty next to `is_available: true`.
+
 ## 10.0.1 — 2026-10-27
 
 ### Added
