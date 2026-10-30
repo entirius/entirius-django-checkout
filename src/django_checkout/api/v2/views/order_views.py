@@ -9,16 +9,18 @@ import os
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.http import FileResponse
-from drf_spectacular.utils import OpenApiExample, OpenApiParameter, extend_schema
+from drf_spectacular.utils import OpenApiExample, OpenApiParameter, OpenApiResponse, extend_schema
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
+from django_checkout.api.v2.exceptions import cart_not_ready_response
 from django_checkout.api.v2.mixins import CheckoutChannelMixin
 from django_checkout.api.v2.openapi import CHANNEL_PARAM, FILE_PARAM, ORDER_PARAM, PRETTY_ID_PARAM
 from django_checkout.api.v2.permissions import ChannelAPIKeyPermission
+from django_checkout.domain.validators.order import CartNotReady
 from django_checkout.models import Order, OrderAttachment
 from django_checkout.schemas.responses.order import OrderCreateResponse, OrderListResponse
 from django_checkout.services import order_service
@@ -36,7 +38,15 @@ class OrderCreateView(CheckoutChannelMixin, APIView):
         summary="Create order",
         description="Finalize cart into order. Validates everything, reserves stock, initiates payment.",
         tags=["Checkout Orders"],
-        responses={201: OrderCreateResponse},
+        responses={
+            201: OrderCreateResponse,
+            409: OpenApiResponse(
+                description=(
+                    "The cart cannot become an order yet. `error` is the reason: `ADDRESSES_NOT_SELECTED`, "
+                    "`SHIPPING_OPTION_NOT_SELECTED`, `PAYMENT_OPTION_NOT_SELECTED` or `OUT_OF_STOCK`."
+                )
+            ),
+        },
     )
     def post(self, request, **kwargs):
         channel = self.get_channel()
@@ -55,6 +65,8 @@ class OrderCreateView(CheckoutChannelMixin, APIView):
             )
         except ObjectDoesNotExist:
             return Response({"error": "NOT_FOUND", "message": "Cart does not exist."}, status=404)
+        except CartNotReady as exc:
+            return cart_not_ready_response(exc)
 
         response = OrderCreateResponse(
             order_id=str(result.order.order_id) if result.order else "",
