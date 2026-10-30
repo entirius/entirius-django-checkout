@@ -9,6 +9,7 @@ from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.response import Response
 
 from django_checkout.domain.dto.discount import DiscountsRejectedError
+from django_checkout.domain.validators.order import CartNotReady
 from django_checkout.enums import ItemStatus
 
 
@@ -47,6 +48,23 @@ def pydantic_error_response(exc: PydanticValidationError) -> Response:
             "details": details,
         },
         status=400,
+    )
+
+
+def cart_not_ready_response(exc: CartNotReady) -> Response:
+    """Convert CartNotReady to a v2 409 with the reason as ``error``.
+
+    Returns a DRF Response directly: it is a v1 exception, which the v2 exception handler answers with a 500.
+    ``status`` may name a SKU after the code ("OUT_OF_STOCK sku: X"); the message names it too.
+    """
+    return Response(
+        {
+            "error": exc.status.split()[0],
+            "message": exc.message,
+            "debug_id": make_debug_id(),
+            "details": [],
+        },
+        status=409,
     )
 
 

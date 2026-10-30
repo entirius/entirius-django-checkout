@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- v2 API (client-visible): `POST orders/` on a cart that cannot become an order yet answers 409 with the reason in
+  `error` (`ADDRESSES_NOT_SELECTED`, `SHIPPING_OPTION_NOT_SELECTED`, `PAYMENT_OPTION_NOT_SELECTED`, `OUT_OF_STOCK`).
+  It answered 500 `INTERNAL_ERROR`, because `OrderValidation` raises a v1 exception the v2 handler does not know, so a
+  customer whose item sold out during checkout got no reason. The v1 response stays 403.
+
 ## 10.0.1 — 2026-10-27
 
 ### Added
