@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- v2 OpenAPI (client-visible, schema only): the guest routes (carts and their steps, `countries/`, `POST orders/`)
+  declare the channel key without the customer JWT next to the key with it. They declared
+  `[{ApiKeyAuth: [], jwtAuth: []}]`, both required, though a guest works with `X-API-KEY` alone, so the schema
+  could not tell them from the customer routes (`orders/list/`, `carts/latest/`, merge), which still need both.
+  Access does not change.
+
 ## 10.0.1 — 2026-10-27
 
 ### Added
