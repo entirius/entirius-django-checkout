@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- v2 OpenAPI (client-visible, schema only): `POST orders/` lists `payment_error` in `OrderCreateResponse`. The 201 body
+  has carried `payment_error: true` when the order was created but the payment provider failed, and the schema did
+  not name it. The body is unchanged: the field is there only on a failed payment.
+
 ## 10.0.1 — 2026-10-27
 
 ### Added

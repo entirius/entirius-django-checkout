@@ -62,10 +62,10 @@ class OrderCreateView(CheckoutChannelMixin, APIView):
             order_status=result.order.order_status if result.order else "",
             redirect_url=result.redirect_url,
             split_orders_pretty_ids=result.split_pretty_ids,
+            payment_error=True if result.payment_failed else None,
         )
-        data = response.model_dump()
-        if result.payment_failed:
-            data["payment_error"] = True
+        # payment_error is in the body only when the payment failed, as before.
+        data = response.model_dump(exclude=None if result.payment_failed else {"payment_error"})
         return Response(data, status=status.HTTP_201_CREATED)
 
 
