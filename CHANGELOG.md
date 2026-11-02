@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `django_checkout.output.quantities.get_bundle_quantities(skus, channel_idx)`: how many of each bundle its
+  components allow, as the cart counts a bundle line (the bundle's own Stock row does not decide; with limits, the
+  required and default components). For other modules that answer stock, so a bundle they report available is one
+  the cart accepts. SKUs that are not bundles are left out.
+
 ## 10.0.1 — 2026-10-27
 
 ### Added
