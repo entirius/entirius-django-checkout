@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- PayPal: the buyer's return (`return/paypal/`) saves the status PayPal's capture API reports on the payment and
+  the order. It answered 500 after the capture and saved nothing, so only the webhook confirmed PayPal orders.
+
 ## 10.0.1 — 2026-10-27
 
 ### Added

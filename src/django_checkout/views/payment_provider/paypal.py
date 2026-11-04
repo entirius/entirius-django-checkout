@@ -67,7 +67,7 @@ def paypal_return(request: WSGIRequest, params: PayPalPayment, *args, **kwargs):
             data={"order_id": payment_intent.order.pretty_id},
         )
     payment_intent.provider_notify = response_body
-    message = make_business_logic_for_status(request, status, payment_intent, extra, bev)
+    message = make_business_logic_for_status(request, status, payment_intent, extra, bev, paypal_order_id)
     return Response(message=f"{message}", data={"order_id": payment_intent.order.pretty_id}, status_code=200)
 
 
