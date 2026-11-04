@@ -275,8 +275,13 @@ class CartV2Response(BaseModel):
     currency: str | None = Field(None, description="Currency code", examples=["EUR"])
 
     # Cart totals
-    subtotal_gross: str = Field(description="Cart subtotal gross (before shipping)", examples=["399.98"])
-    subtotal_net: str | None = Field(None, description="Cart subtotal net", examples=["325.19"])
+    subtotal_gross: str = Field(
+        description="Valid items at catalogue price, gross: before special prices, discounts, shipping and the payment fee",
+        examples=["399.98"],
+    )
+    subtotal_net: str | None = Field(
+        None, description="Net of subtotal_gross: the items' catalogue net", examples=["325.19"]
+    )
     total_gross: str = Field(description="Cart total gross (incl shipping + fee)", examples=["419.97"])
     total_net: str | None = Field(None, description="Cart total net", examples=["341.44"])
     total_tax: str | None = Field(None, description="Total tax amount", examples=["78.53"])
