@@ -73,6 +73,14 @@
 
 ### Fixed
 
+- A voucher larger than what the cart has left is debited only by what it takes off (client-visible:
+  `voucher_amount_applied` and the voucher's payment intent drop, the gift card keeps the rest). With a 200.00 gift
+  card on a 123.00 item and a 10 % code the cart took 110.70 off and the card lost 123.00: the voucher module was
+  handed each line at its price before discounts and debited that. When the order is created,
+  `compute_cart_voucher_total_signal` now gets what each line costs after its discount; while the cart is edited it
+  still gets the line totals, so a code added and removed leaves the voucher's cover alone.
+  `voucher_amount_applied` is never more than the total it reduced (PayPal's `discount` and the voucher's payment
+  intent read it; a cart below `min_order_price` no longer counts a voucher's surplus towards it).
 - Stripe: a line of several units with a cart discount is charged its discounted total. Its `unit_amount` was the
   unit price less the discount of the whole line, and Stripe multiplies `unit_amount` by the quantity: 3 x 54.99 at
   15 % off charged 90.72 instead of 140.22, and a large discount sent a negative amount Stripe refused. Lines carry
