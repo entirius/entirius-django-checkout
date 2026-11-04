@@ -26,6 +26,8 @@
 - Paynow: notifications go through the same rules: a late or repeated status no longer pulls a COMPLETE payment
   back, re-confirms an order that moved on, or cancels an order confirmed by hand. BI finish tags keep their wording.
 
+- Paynow: `notify/paynow/` changes only a Paynow payment (another gateway's payment is answered 404, like any other
+  refused notification), and the `Signature` header is compared in constant time.
 - Przelewy24: `notify/przelewy24/` changes only a Przelewy24 payment: a notification naming another gateway's
   payment is answered 403 before Przelewy24 is asked, and a body needs both `orderId` and `sessionId`. The verify
   call uses the payment's own method, not the first method listed on the order (with a voucher listed first it
