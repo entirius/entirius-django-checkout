@@ -31,7 +31,13 @@ from django_checkout.models.stock import Stock
 from django_checkout.models.stock_reservation import StockReservation
 from django_checkout.models.used_coupon import UsedCoupon
 from django_checkout.signals import order_canceled_signal, order_confirmed_signal, order_created_signal
-from django_checkout.utils import anonymize, anonymize_addresses_in_body, sanitize, scrub_payment_secrets_in_body
+from django_checkout.utils import (
+    REDACTED,
+    anonymize,
+    anonymize_addresses_in_body,
+    sanitize,
+    scrub_payment_secrets_in_body,
+)
 
 if TYPE_CHECKING:
     from django_accounts.models.customer import Customer
@@ -511,7 +517,7 @@ class Order(models.Model):
         True if any of them held something to anonymise. Every step runs: an `or` chain would short-circuit.
         """
         with transaction.atomic():
-            changed = [self._anonymize_own_fields(), self._anonymize_used_coupons()]
+            changed = [self._anonymize_own_fields(), self._anonymize_used_coupons(), self._redact_payment_redirects()]
             changed += [intent.anonymize() for intent in self.payment_items.all()]
         return any(changed)
 
@@ -528,6 +534,10 @@ class Order(models.Model):
             self.order_body = sanitize(body)
             self.save()
         return any(changed)
+
+    def _redact_payment_redirects(self) -> bool:
+        """A redirect's target is the body's ``continue_url``, which the body scrub redacts: redact the copy too."""
+        return self.payment_redirects.exclude(target_url=REDACTED).update(target_url=REDACTED) > 0
 
     def _anonymize_used_coupons(self) -> bool:
         """The e-mails a used code stores: the address e-mails or, for a logged-in customer, the account one."""

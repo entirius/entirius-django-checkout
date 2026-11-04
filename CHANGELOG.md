@@ -75,7 +75,8 @@
   of both addresses, the customer's comment and IP (in the order and in its cart); and the gateway payloads of its
   payments (`PaymentIntent.provider_request` / `provider_notify`: buyer, payer, shipping address), which keep only
   ids, amounts, currencies, statuses and timestamps. The intent's columns (amount, currency, external id, status)
-  stay. The request also finds orders by those e-mail columns and by the e-mail a used code stored (the account
+  stay. The payment redirect bridge's target (`PaymentRedirect.target_url`, a copy of the `continue_url` the body
+  already redacted) becomes `***REDACTED***`, so a link still open answers 404. The request also finds orders by those e-mail columns and by the e-mail a used code stored (the account
   e-mail of a deleted account), so repeating it completes an order an earlier erasure left half done. New command
   `complete-erasures` finishes the orders and carts erased before this release (dry run unless `--apply`).
 - Stripe: a line of several units with a cart discount is charged its discounted total. Its `unit_amount` was the

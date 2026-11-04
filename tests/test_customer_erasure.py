@@ -23,14 +23,17 @@ from io import StringIO
 
 import pytest
 from django.core.management import call_command
+from django.test import RequestFactory
+from django.utils import timezone
 from process_logger import ProcessLogger
 from rest_framework.test import APIRequestFactory
 
 from django_checkout.enums import OrderStatus, PaymentIntentStatus
-from django_checkout.models import Cart, Order, PaymentIntent, UsedCoupon
+from django_checkout.models import Cart, Order, PaymentIntent, PaymentRedirect, UsedCoupon
 from django_checkout.services.customer import BlockingOrder, CustomerService, ErasureBlocked
 from django_checkout.signals import customer_anonymized_signal
 from django_checkout.views.admin.customer import admin_customer_delete
+from django_checkout.views.payment_redirect import payment_redirect_bridge
 from tests.conftest import ERASE_SCOPE
 
 EMAIL = "anna.testowa@example.org"
@@ -458,6 +461,37 @@ def test_anonymize_is_idempotent(channel):
     order.refresh_from_db()
     intent.refresh_from_db()
     assert (order.order_body, order.billing_email, intent.provider_request, intent.provider_notify) == first
+
+
+@pytest.mark.django_db
+def test_anonymize_redacts_the_payment_redirect_target(channel):
+    """The bridge's target is a copy of the body's ``continue_url``, which the body scrub already redacts."""
+    order = _order(channel)
+    target = f"exp://shop.example/thanks?email={EMAIL}"
+    redirect = PaymentRedirect.objects.create(order=order, target_url=target, expires_at=timezone.now())
+
+    assert order.anonymize() is True
+
+    redirect.refresh_from_db()
+    assert redirect.target_url == "***REDACTED***"
+
+
+@pytest.mark.django_db
+def test_a_redacted_payment_redirect_answers_404(channel, monkeypatch):
+    """A bridge link still open after the erasure leads nowhere instead of to the old target."""
+    from django_checkout import settings as checkout_settings
+
+    monkeypatch.setattr(checkout_settings, "PAYMENT_REDIRECT_BRIDGE_TARGET_SCHEMES", ["exp"])
+    order = _order(channel)
+    expires_at = timezone.now() + timezone.timedelta(minutes=30)
+    redirect = PaymentRedirect.objects.create(
+        order=order, target_url="exp://shop.example/thanks", expires_at=expires_at
+    )
+    order.anonymize()
+
+    response = payment_redirect_bridge(RequestFactory().get("/"), "1", channel.idx, redirect.token)
+
+    assert response.status_code == 404
 
 
 @pytest.mark.django_db
