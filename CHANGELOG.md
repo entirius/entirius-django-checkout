@@ -78,6 +78,9 @@
   the order. It answered 500 after the capture and saved nothing, so only the webhook confirmed PayPal orders.
 ### Added
 
+- Docs: `docs/api/checkout.md` (Code usage) says what an order that loses the race for a code's last use leaves
+  behind. It has already opened a payment session at the gateway when it rolls back; the customer never gets the
+  session, no money moves, and the gateway keeps it as an abandoned, unpaid session.
 - A discount code is unique per (channel, currency): two rules that share a channel and a currency (a rule
   without currencies holds every currency) may not hold the same code. The same code on rules of other channels
   or of other currencies stays allowed (`GRATIS_STEP` on an EUR and a PLN rule). Admin API v2 (client-visible
