@@ -10,6 +10,7 @@ from django import forms
 from django.contrib import admin, messages
 from django.contrib.admin import SimpleListFilter
 from django.db.models import Count, F, Q, Sum
+from django.forms.models import BaseInlineFormSet
 from django.http import HttpResponse
 from django.shortcuts import redirect
 from django.urls import path
@@ -54,6 +55,13 @@ from django_checkout.models import (
 from django_checkout.models.limited_products import LimitedProducts
 from django_checkout.models.stock import Stock
 from django_checkout.models.stock_reservation import StockReservation
+from django_checkout.services.code_clashes import (
+    DiscountCodeClash,
+    Scope,
+    find_clashes,
+    refuse_clash,
+    refuse_scope_change,
+)
 from django_checkout.signals import order_additional_info
 from django_checkout.utils.api_keys import access_installed, mask_key
 from django_checkout.worker.export_discount_rules import export_discount_rules_to_csv
@@ -298,8 +306,49 @@ class CartAdmin(admin.ModelAdmin):
     data_prettified.short_description = "data prettified"
 
 
+class DiscountCodeInlineFormSet(BaseInlineFormSet):
+    """The rule's codes must not clash under the channels and currencies the rule form is about to save.
+
+    ``DiscountRuleCodeAdmin.save_form`` puts that scope on the rule (``pending_scope``) before the admin validates the
+    inlines; without it the rule form failed, nothing is saved, and there is nothing to check. Unchanged rows are not
+    checked: a clash stored before keeps working.
+    """
+
+    def clean(self):
+        super().clean()
+        after = getattr(self.instance, "pending_scope", None)
+        if after is None:
+            return
+        if problems := self._new_code_problems(after) + self._scope_problems(after):
+            raise forms.ValidationError(list(dict.fromkeys(problems)))  # a code twice is found from both rows
+
+    def _kept_forms(self) -> list:
+        return [f for f in self.forms if f.cleaned_data.get("code") and not f.cleaned_data.get("DELETE")]
+
+    def _new_code_problems(self, after: Scope) -> list[str]:
+        kept = self._kept_forms()
+        problems = []
+        for form in (f for f in kept if not f.instance.pk or "code" in f.changed_data):
+            code = form.cleaned_data["code"]
+            if any(other is not form and other.cleaned_data["code"] == code for other in kept):
+                problems.append(f"Code '{code}' appears twice on this rule.")
+            elif clashes := find_clashes([code], after, exclude_code_id=form.instance.pk):
+                problems.append(clashes[0].describe())
+        return problems
+
+    def _scope_problems(self, after: Scope) -> list[str]:
+        if not self.instance.pk:
+            return []
+        try:
+            refuse_scope_change(self.instance, Scope.of(self.instance), after, field="channels")
+        except DiscountCodeClash as exc:
+            return [exc.clash.describe()]
+        return []
+
+
 class DiscountCodeInline(TabularInlinePaginated):
     model = DiscountCode
+    formset = DiscountCodeInlineFormSet
     fields = ["code", "max_used", "max_uses_per_user", "current_used", "active_from", "active_to", "max_products_qty"]
     per_page = 100
     extra = 0
@@ -462,8 +511,24 @@ class RuleTypeFilter(SimpleListFilter):
             return queryset.filter(rule__free_order=True)
 
 
+class DiscountCodeAdminForm(forms.ModelForm):
+    """A new code, or a code moved to another string or rule, must not clash; an unchanged one keeps working."""
+
+    def clean(self):
+        cleaned_data = super().clean()
+        code, rule = cleaned_data.get("code"), cleaned_data.get("rule")
+        if not code or rule is None or (self.instance.pk and not {"code", "rule"} & set(self.changed_data)):
+            return cleaned_data
+        try:
+            refuse_clash(code, rule, field="code", exclude_code_id=self.instance.pk)
+        except DiscountCodeClash as exc:
+            self.add_error("code", exc.clash.describe())
+        return cleaned_data
+
+
 @admin.register(DiscountCode)
 class DiscountCodeAdmin(admin.ModelAdmin):
+    form = DiscountCodeAdminForm
     list_display = [
         "rule_name",
         "code",
@@ -999,6 +1064,17 @@ class DiscountRuleCodeAdmin(admin.ModelAdmin):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.import_service = DiscountCodeImportService(logger)
+
+    def save_form(self, request, form, change):
+        """The admin calls this before it validates the inlines: the codes inline checks against this scope."""
+        rule = super().save_form(request, form, change)
+        stored = Scope.of(rule) if rule.pk else Scope(frozenset(), frozenset())
+        data = form.cleaned_data
+        rule.pending_scope = Scope(
+            frozenset(c.idx for c in data["channels"]) if "channels" in data else stored.channels,
+            frozenset(c.iso3 for c in data["currencies"]) if "currencies" in data else stored.currencies,
+        )
+        return rule
 
     def csv_import(self, request):
         if request.method == "POST" and "file" in request.FILES:
