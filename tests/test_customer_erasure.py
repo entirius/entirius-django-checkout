@@ -635,6 +635,56 @@ def test_erasure_request_leaves_an_email_that_merely_contains_the_erased_one(cha
     assert other_cart.cart_body == _body(longer)
 
 
+def _gift_for(recipient_email: str, owner_email: str = OTHER_EMAIL) -> dict:
+    """A body of ``owner_email`` with a gift card for ``recipient_email`` and a comment naming them."""
+    body = _body(owner_email)
+    gift = {"recipient_email": recipient_email, "recipient_name": "Basia", "message": "Happy birthday"}
+    body["cart"] = {"items": [{"sku": "GIFT-CARD-50", "quantity": 1, "voucher_gift": gift}]}
+    body["comment"] = f"Please send the card to {recipient_email.upper()} by Friday"
+    return body
+
+
+@pytest.mark.django_db
+def test_another_customers_order_keeps_everything_but_the_erased_email(channel):
+    """B is only the recipient of A's gift card: A's names, addresses and columns stay, B's e-mail goes."""
+    order = Order.objects.create(
+        channel=channel,
+        order_body=_gift_for(EMAIL),
+        billing_email=OTHER_EMAIL,
+        shipping_email=OTHER_EMAIL,
+        order_status=OrderStatus.COMPLETED,
+    )
+    cart = Cart.objects.create(channel=channel, cart_body=_gift_for(EMAIL))
+
+    success, orders_idxs, carts_idxs, *_ = _erase(EMAIL)
+
+    assert (success, orders_idxs, carts_idxs) == (True, [str(order.order_id)], [str(cart.cart_id)])
+    for row, body in ((order, "order_body"), (cart, "cart_body")):
+        row.refresh_from_db()
+        stored = getattr(row, body)
+        assert EMAIL not in json.dumps(stored).lower()
+        assert stored["addresses"] == _body(OTHER_EMAIL)["addresses"]
+        gift = stored["cart"]["items"][0]["voucher_gift"]
+        assert gift == {"recipient_email": ANONYMIZED_EMAIL, "recipient_name": "Basia", "message": "Happy birthday"}
+        assert stored["comment"] == f"Please send the card to {ANONYMIZED_EMAIL} by Friday"
+    assert (order.billing_email, order.shipping_email) == (OTHER_EMAIL, OTHER_EMAIL)
+
+
+@pytest.mark.django_db
+def test_another_customers_open_order_holding_the_email_refuses_the_erasure(channel):
+    """The shop may still have to deliver A's gift card to B's address."""
+    order = Order.objects.create(
+        channel=channel, order_body=_gift_for(EMAIL), billing_email=OTHER_EMAIL, order_status=OrderStatus.CONFIRMED
+    )
+
+    with pytest.raises(ErasureBlocked) as refused:
+        _erase(EMAIL)
+
+    assert [blocking.order_id for blocking in refused.value.orders] == [str(order.order_id)]
+    order.refresh_from_db()
+    assert order.order_body == _gift_for(EMAIL)
+
+
 # --- Orders the shop still has to fulfil refuse the erasure ------------------------------------------------------
 
 OPEN_STATUSES = [

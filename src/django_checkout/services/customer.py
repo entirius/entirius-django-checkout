@@ -2,7 +2,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-import json
 from dataclasses import dataclass, field
 
 from django.db.models import Q, QuerySet
@@ -11,6 +10,7 @@ from process_logger import ProcessLoggerMixin
 from django_checkout.enums import OrderStatus
 from django_checkout.models import Cart, Channel, Order, UsedCoupon
 from django_checkout.signals import customer_anonymized_signal
+from django_checkout.utils import anonymize_email_in_body
 
 # The shop has nothing left to do with an order in these statuses: delivered, returned or cancelled. Any other one
 # (waiting for payment, confirmed, on hold, in progress) still needs the delivery address and the contact, so an
@@ -61,13 +61,15 @@ def _refuse_unsettled(orders: list[Order]) -> None:
         raise ErasureBlocked(blocking)
 
 
-def _in_body(email: str) -> str:
-    """``email`` as a JSON string value: a body matches the whole address, never one that merely contains it."""
-    return json.dumps(email, ensure_ascii=False)
+def _address_email(body_field: str, email: str) -> Q:
+    """The billing or the shipping address of the body holds ``email`` (the whole address, case aside)."""
+    return Q(**{f"{body_field}__addresses__billing_address__email__iexact": email}) | Q(
+        **{f"{body_field}__addresses__shipping_address__email__iexact": email}
+    )
 
 
 def _orders_of(email: str) -> QuerySet:
-    """Orders holding ``email`` anywhere checkout keeps it.
+    """The customer's orders: by the account, the e-mail columns, the address e-mails and the used codes.
 
     The columns and the used codes find an order whose body an earlier erasure already anonymised, so a repeated
     request completes it; a used code also holds the account e-mail of a customer whose account is gone.
@@ -78,8 +80,18 @@ def _orders_of(email: str) -> QuerySet:
         | Q(billing_email__iexact=email)
         | Q(shipping_email__iexact=email)
         | Q(pk__in=used_codes.values("order_id"))
-        | Q(order_body__icontains=_in_body(email))
+        | _address_email("order_body", email)
     )
+
+
+def _carts_of(email: str) -> QuerySet:
+    return Cart.objects.filter(Q(customer__user__email=email) | _address_email("cart_body", email))
+
+
+def _rewritten_mentions(rows: QuerySet, body_field: str, email: str) -> list:
+    """Other customers' rows whose body holds ``email`` elsewhere, with it replaced in memory (nothing saved)."""
+    candidates = rows.filter(**{f"{body_field}__icontains": email})
+    return [row for row in candidates if anonymize_email_in_body(getattr(row, body_field), email)]
 
 
 class CustomerService(ProcessLoggerMixin):
@@ -88,23 +100,49 @@ class CustomerService(ProcessLoggerMixin):
     ) -> tuple[bool, list[str], list[str], list[str], list[str]]:
         """Anonymise the orders and carts of ``email``: in ``channel`` only, or in every channel when None.
 
-        Raises ``ErasureBlocked`` before anything is written while one of the orders is not settled yet.
+        Another customer's order or cart that holds the e-mail in some other field keeps everything but that e-mail.
+        Raises ``ErasureBlocked`` before anything is written while one of the orders it would change is not settled.
         """
         orders = list(
             _in_channel(_orders_of(email), channel)
             .select_related("cart")
             .prefetch_related("used_coupons", "payment_items")
         )
-        _refuse_unsettled(orders)
+        others = _in_channel(Order.objects.exclude(pk__in=[order.pk for order in orders]), channel)
+        mentioning = _rewritten_mentions(others, "order_body", email)
+        _refuse_unsettled(orders + mentioning)
         erasure = _Erasure()
         for order in orders:
             if self._anonymize_order(order, erasure) and order.cart is not None:
                 self._anonymize_cart(order.cart, erasure)
-        carts = Cart.objects.filter(Q(customer__user__email=email) | Q(cart_body__icontains=_in_body(email)))
-        for cart in _in_channel(carts, channel):
-            self._anonymize_cart(cart, erasure)
+        for order in mentioning:
+            self._save_mention(order, erasure)
+        self._erase_carts(email, channel, erasure)
         self._notify(email, erasure, channel)
         return erasure.result()
+
+    def _erase_carts(self, email: str, channel: Channel | None, erasure: _Erasure) -> None:
+        carts = list(_in_channel(_carts_of(email), channel))
+        for cart in carts:
+            self._anonymize_cart(cart, erasure)
+        others = _in_channel(Cart.objects.exclude(pk__in=[cart.pk for cart in carts]), channel)
+        for cart in _rewritten_mentions(others, "cart_body", email):
+            self._save_mention(cart, erasure)
+
+    def _save_mention(self, row: Order | Cart, erasure: _Erasure) -> None:
+        """Store another customer's body in which only the erased e-mail changed."""
+        if isinstance(row, Order):
+            body_field, row_id, done, failed = "order_body", str(row.order_id), erasure.orders_idxs, erasure.orders_fail
+        else:
+            body_field, row_id, done, failed = "cart_body", str(row.cart_id), erasure.carts_idxs, erasure.carts_fail
+        try:
+            type(row).objects.filter(pk=row.pk).update(**{body_field: getattr(row, body_field)})
+        except Exception as e:
+            self.logger.exception(e)
+            failed.append(row_id)
+            erasure.success = False
+            return
+        done.append(row_id)
 
     def _anonymize_order(self, order: Order, erasure: _Erasure) -> bool:
         """False when anonymising the order failed (its cart is then left alone)."""

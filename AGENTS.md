@@ -152,7 +152,10 @@ toggles and defaults: `docs/configuration.md`.
   `CustomerService.anonymize_customer` refuses (`ErasureBlocked`, v1 409 `OPEN_ORDERS`) before writing anything while
   one of the orders is outside `SETTLED_ORDER_STATUSES`: the check lives in the service so every entry point gets it.
   `complete-erasures` calls `anonymize()` itself and is never refused. Integrators erase in checkout before deleting
-  the account in `django_accounts`; the other way round orders are found only by the e-mails they hold.
+  the account in `django_accounts`; the other way round orders are found only by the e-mails they hold. The
+  customer's rows are found by fixed fields (account, e-mail columns, address e-mails, used codes), never by a body
+  search: another customer's row that holds the e-mail elsewhere only gets that e-mail replaced
+  (`utils.anonymize_email_in_body`).
 - A discount code is unique per (channel, currency), a rule without currencies covering every currency
   (`services/code_clashes.py`, `docs/api/discounts.md`). Every write path (v2 admin service, Django admin forms,
   `import-discount-rules`) calls `refuse_clash` / `refuse_scope_change`; a new one must too. No DB constraint

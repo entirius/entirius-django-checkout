@@ -1995,10 +1995,16 @@ and a notification the gateway may still send for that session finds no payment 
 
 `DELETE /api-admin/checkout/1/{channel}/customer/delete` with `{"email": "<address>"}` (admin key, scope
 `checkout.erase`; `django_checkout.output.admin.admin_customer_delete` is the same for Python callers) anonymises
-the orders and carts of that e-mail. It finds an order by the customer account, by the `billing_email` /
-`shipping_email` columns, by the e-mail a used code stored and by `order_body`, so a repeated request completes an
-order an earlier one left half done. Every match is the whole address, case aside: erasing `anna@example.org` leaves
+the orders and carts of that e-mail. It finds the customer's orders by the account, the `billing_email` /
+`shipping_email` columns, the e-mail of the billing or shipping address in `order_body` and the e-mail a used code
+stored, so a repeated request completes an order an earlier one left half done; carts by the account and the
+address e-mails in `cart_body`. Every match is the whole address, case aside: erasing `anna@example.org` leaves
 `joanna@example.org` alone. A pinned erase token covers its channel only.
+
+Another customer's order or cart that holds the e-mail in some other field keeps everything but that e-mail: in
+every string of the body (a gift card's `recipient_email` in `cart.items[].voucher_gift`, the `comment`, any other
+field) the address becomes the marker, and the rest of the text, the names, the addresses, the e-mail columns and
+the payments stay. The response lists such an order or cart with the others.
 
 | Where | Anonymised | Kept |
 |---|---|---|
@@ -2016,7 +2022,9 @@ Names and free text become `x` of the same length, e-mails `x…x@example.com`. 
 #### Orders not fulfilled yet refuse it
 
 While the customer has an order the shop still has to fulfil, the erasure is refused and nothing is anonymised:
-not that order, not the customer's other orders, not the carts. A pinned token looks at its channel's orders only.
+not that order, not the customer's other orders, not the carts. The same goes for another customer's order still to
+fulfil that holds the e-mail (the shop may still have to deliver a gift card to it). A pinned token looks at its
+channel's orders only.
 
 | Status | Refuses the erasure | Why |
 |---|---|---|

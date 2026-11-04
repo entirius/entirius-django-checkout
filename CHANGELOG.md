@@ -82,9 +82,13 @@
   The request also finds orders by those e-mail columns and by the e-mail a used code stored (the account e-mail of
   a deleted account), so repeating it completes an order an earlier erasure left half done. New command
   `complete-erasures` finishes the orders and carts erased before this release (dry run unless `--apply`).
-- Customer erasure no longer anonymises another customer whose e-mail contains the erased one: `order_body` and
-  `cart_body` were searched for the e-mail as a substring, so erasing `anna@example.org` also anonymised the orders
-  and carts of `joanna@example.org`. The bodies now match the whole address (case-insensitive), as the columns do.
+- Customer erasure no longer anonymises another customer's order or cart. `order_body` and `cart_body` were
+  searched for the e-mail as a substring, so erasing `anna@example.org` anonymised every order and cart of
+  `joanna@example.org`, and erasing a gift card's recipient anonymised the buyer's whole order. The customer's own
+  orders are found by the account, the e-mail columns, the billing and shipping address e-mails and the used codes
+  (the whole address, case-insensitive); carts by the account and the address e-mails. In another customer's order
+  or cart the erased e-mail is replaced wherever a string holds it (gift card recipient, comment) and nothing else
+  changes; such an order still to fulfil refuses the erasure.
 - Log lines and BI events no longer carry a customer's personal data. The admin order preview (v2
   `GET admin/{channel}/orders/{uid}/`) logged the billing e-mail and now logs the order id; the PayU, PayPal and
   Stripe notification views logged and sent to BI the whole notification (buyer, payer, `customer_details`) and now
