@@ -135,9 +135,7 @@ class PayUPaymentProvider(BasePaymentProvider, ProcessLoggerMixin):
         return PayUOrder(
             extOrderId=order.pretty_id,
             notifyUrl=self.get_notify_url(),
-            continueUrl=self.resolve_continue_url(
-                order_dto.primary_payment_method.add_order_id_to_continue_url(order.pretty_id), order
-            ),
+            continueUrl=self.resolve_own_continue_url(order, order_dto),
             customerIp=self.get_client_ip(),
             merchantPosId=self.payment_method.additional_data["pos_id"],
             description=order.pretty_id,
