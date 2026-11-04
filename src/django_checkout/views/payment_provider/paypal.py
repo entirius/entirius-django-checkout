@@ -3,6 +3,7 @@
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 import json
+import logging
 
 from django.core.handlers.wsgi import WSGIRequest
 from django.views.decorators.csrf import csrf_exempt
@@ -14,8 +15,9 @@ from process_logger import ProcessLogger
 
 from django_checkout.domain.dto.paypal import PayPalPayment
 from django_checkout.domain.payment_provider.paypal_payment_provider import get_use_sandbox_setting
+from django_checkout.domain.payment_provider.paypal_webhook import WEBHOOK_ID_FIELD, get_webhook_id, is_valid_webhook
 from django_checkout.domain.reservation import release_stock_reservation
-from django_checkout.enums import OrderStatus, PaymentIntentStatus
+from django_checkout.enums import OrderStatus, PaymentIntentStatus, PaymentProvider
 from django_checkout.models import Order, PaymentIntent
 from django_checkout.settings import PAYPAL_CAPTURE_PAYMENT_AFTER_APPROVED_ORDER_WEBHOOK
 
@@ -132,6 +134,17 @@ def paypal_notify(request: WSGIRequest, *args, **kwargs):
         bev.finish_with_error(finish_tag="Can not find related PaymentIntent object", details=extra)
         return Response(data={"message": "For more information see log"}, status="FAIL", status_code=200)
 
+    # Authenticity check, before anything is written. Until it passes, every field in `body` is
+    # caller-controlled, the order id included.
+    rejection = _rejection_reason(request, payment_intent)
+    if rejection:
+        extra = {"paypal_order_id": paypal_order_id, "payment_intent_pk": payment_intent.pk, "is_status_changed": False}
+        _log_alone(logging.ERROR, rejection, extra)
+        bev.finish_with_error(finish_tag="PayPal notification rejected", details=extra)
+        # Not 200, deliberately: PayPal redelivers on any other code, so a genuine webhook rejected
+        # while a method's webhook id is being configured lands once it is.
+        return Response(data={"message": "Notification rejected"}, status="FAIL", status_code=403)
+
     # Validation: do we have valid status field in response?
     if "status" not in body["resource"]:
         extra = {"paypal_order_id": paypal_order_id, "payu_response": body, "is_status_changed": False}
@@ -146,6 +159,30 @@ def paypal_notify(request: WSGIRequest, *args, **kwargs):
 
     make_business_logic_for_status(request, status, payment_intent, {}, bev, paypal_order_id)
     return Response(data={})
+
+
+def _log_alone(level: int, message: str, params: dict) -> None:
+    """One log line carrying only ``params``.
+
+    The logger is shared by every request in the worker and add_log_param() keeps values, so a
+    plain call would carry other requests' params, full request bodies included.
+    """
+    logger_process.reset_log_params()
+    for key, value in params.items():
+        logger_process.add_log_param_once(key, value)
+    logger_process.log(level, message)
+
+
+def _rejection_reason(request: WSGIRequest, payment_intent: PaymentIntent) -> str | None:
+    """Why this notification must not touch ``payment_intent``, or None when PayPal sent it for it."""
+    method = payment_intent.method
+    if method is None or method.provider != PaymentProvider.PAYPAL:
+        return "PaymentIntent is not a PayPal payment, notification ignored"
+    if not get_webhook_id(method):
+        return f"PayPal PaymentMethod is missing '{WEBHOOK_ID_FIELD}' in additional_data, cannot verify notification"
+    if not is_valid_webhook(request.body, request.headers, method):
+        return "PayPal webhook signature is invalid or could not be verified"
+    return None
 
 
 @csrf_exempt

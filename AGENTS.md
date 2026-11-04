@@ -134,3 +134,6 @@ toggles and defaults: `docs/configuration.md`.
   peer otherwise, plus the cart id where the request names one. Behind a proxy `NUM_PROXIES` must be set.
 - PayU notifications need `second_key` in the method's `additional_data` (403 without it); `checks.py` reports
   PayU methods that lack it as `django_checkout.W001` (database-tagged: `manage.py check --database default`).
+- PayPal notifications need `webhook_id` in the method's `additional_data` and are verified by PayPal's
+  verify-webhook-signature postback (403 without the id, on a failed or unreachable check, or for a non-PayPal
+  payment); `checks.py` reports PayPal methods that lack it as `django_checkout.W002`.

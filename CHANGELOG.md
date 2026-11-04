@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Security
+
+- PayPal: `notify/paypal/` changes a payment only when PayPal confirms the notification's signature
+  (verify-webhook-signature, against the `webhook_id` in the payment method's `additional_data`) and the payment
+  belongs to a PayPal payment method. Anything else is answered 403 and writes nothing; PayPal redelivers it. The
+  verification calls PayPal with a 10 s timeout. `django_checkout.W002` (`manage.py check --database default`)
+  lists PayPal methods without `webhook_id`.
+
+### Upgrade notes
+
+- **PayPal:** every PayPal payment method needs `webhook_id` (PayPal developer dashboard: the REST app, Webhooks,
+  Webhook ID of the webhook pointing at `notify/paypal/`) in its `additional_data`. Without it webhook notifications
+  are refused (PayPal retries them for about 3 days) and an order is confirmed only when the buyer returns to the
+  shop.
+
 ### Fixed
 
 - PayPal: the buyer's return (`return/paypal/`) saves the status PayPal's capture API reports on the payment and
