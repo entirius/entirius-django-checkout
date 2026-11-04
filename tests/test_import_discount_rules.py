@@ -8,7 +8,7 @@ import signal
 
 import pytest
 
-from django_checkout.models import DiscountRuleCode
+from django_checkout.models import DiscountCode, DiscountRuleCode
 from django_checkout.worker.import_discount_rules import creating_in_db_for_each_line
 
 
@@ -84,3 +84,39 @@ def test_a_row_with_a_mode_of_action_imports_it_and_its_codes(channel):
     rule = DiscountRuleCode.objects.get(name="Imported")
     assert rule.discount_mode_of_actions_rule.count() == 1
     assert rule.codes.count() == 1
+
+
+@pytest.mark.django_db
+def test_a_code_another_rule_holds_in_the_channel_is_skipped_and_the_others_imported(channel):
+    holder = DiscountRuleCode.objects.create(name="Holder", modifier="percent_discount", extra_value=5)
+    holder.channels.set([channel])
+    DiscountCode.objects.create(rule=holder, code="SUMMER")
+
+    creating_in_db_for_each_line([_row(channel, "SUMMER", "WINTER")])
+
+    imported = DiscountRuleCode.objects.get(name="Imported")
+    assert list(imported.codes.values_list("code", flat=True)) == ["WINTER"]
+    assert list(DiscountCode.objects.filter(code="SUMMER").values_list("rule_id", flat=True)) == [holder.pk]
+
+
+@pytest.mark.django_db
+def test_importing_the_same_file_twice_adds_no_code(channel):
+    creating_in_db_for_each_line([_row(channel, "SUMMER")])
+    creating_in_db_for_each_line([_row(channel, "SUMMER")])
+
+    assert DiscountCode.objects.filter(code="SUMMER").count() == 1
+
+
+@pytest.mark.django_db
+def test_moving_a_rule_into_a_channel_where_its_code_is_taken_skips_the_row(channel, other_channel):
+    holder = DiscountRuleCode.objects.create(name="Holder", modifier="percent_discount", extra_value=5)
+    holder.channels.set([channel])
+    DiscountCode.objects.create(rule=holder, code="SUMMER")
+    creating_in_db_for_each_line([_row(other_channel, "SUMMER")])
+    moved = _row(other_channel, "SUMMER")
+    moved["channels"] = f"{other_channel.idx},{channel.idx}"
+
+    creating_in_db_for_each_line([moved])
+
+    imported = DiscountRuleCode.objects.get(name="Imported")
+    assert list(imported.channels.values_list("idx", flat=True)) == [other_channel.idx]

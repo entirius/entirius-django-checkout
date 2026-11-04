@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Added
+
+- A discount code is unique per (channel, currency): two rules that share a channel and a currency (a rule
+  without currencies holds every currency) may not hold the same code. The same code on rules of other channels
+  or of other currencies stays allowed (`GRATIS_STEP` on an EUR and a PLN rule). Admin API v2 (client-visible
+  addition): creating or renaming a clashing code, a rule created with one, or new `channels` / `currencies` that
+  make a rule's code clash with a row it did not clash with before answer 400 `VALIDATION_ERROR` with the detail
+  on `code`, `codes.<i>.code`, `currencies` or `channels` and issue `UNIQUE`; nothing is written. The Django admin
+  (code page, the rule's codes inline) refuses the same, and `import-discount-rules` skips a clashing code (and a
+  row whose new channels clash) with a warning. Clashes stored before keep working, and an edit that does not
+  touch them goes through. No migration and no database constraint: the new configuration check
+  `checkout.discount_codes` (`manage.py check --database default --tag checkout.discount_codes`, and the CMS
+  through django-munin) lists the stored ones per channel. Reference: `docs/api/discounts.md`.
+
 ### Fixed
 
 - `import-discount-rules` (and the CSV import in the Django admin) no longer hangs. The mode-of-action loop of a
