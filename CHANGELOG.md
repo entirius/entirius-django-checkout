@@ -73,6 +73,13 @@
 
 ### Fixed
 
+- Stripe: a line of several units with a cart discount is charged its discounted total. Its `unit_amount` was the
+  unit price less the discount of the whole line, and Stripe multiplies `unit_amount` by the quantity: 3 x 54.99 at
+  15 % off charged 90.72 instead of 140.22, and a large discount sent a negative amount Stripe refused. Lines carry
+  the sold unit price; what the cart takes off its items (cart discounts, a gift's price, a voucher taken off the
+  total) goes into one `amount_off` coupon per session, single use, in the order's currency, on the payment method's
+  account. A gift was charged its product's full price, and a voucher on top of the card. The coupon is named by
+  `localized_names.discount` in the method's `additional_data` (default `Discount`).
 - A voucher on a cart that splits into several orders is refused (client-visible). The cart reports
   `voucher_not_supported_on_split_order` (v2 `_errors` code `VOUCHER_NOT_SUPPORTED_ON_SPLIT_ORDER`, v1 `extra`
   `split_parts`) and stays `invalid`; `POST orders/` refuses it with v2 409 and that `error`, v1 403 and that

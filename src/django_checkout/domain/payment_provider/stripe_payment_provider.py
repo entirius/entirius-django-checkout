@@ -2,6 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+from datetime import timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
 
@@ -48,12 +49,16 @@ class StripePaymentProvider(BasePaymentProvider, ProcessLoggerMixin):
                     "en": "Payment Method Fee",
                     "de": "Zahlungsgebühr",
                     "pl": "Opłata za metodę płatności"
+                },
+                "discount": {
+                    "en": "Discount",
+                    "pl": "Rabat"
                 }
             }
         }
 
         Args:
-            key: The key to look up (e.g., "shipping", "payment_fee")
+            key: The key to look up (e.g., "shipping", "payment_fee", "discount")
             language_code: ISO language code (e.g., "en", "de", "pl")
             default: Default value if translation not found
 
@@ -187,7 +192,50 @@ class StripePaymentProvider(BasePaymentProvider, ProcessLoggerMixin):
 
         result = {**self.map_order(order), "line_items": line_items, **self.map_buyer(order)}
 
+        discounts = self.build_discounts(order, cart)
+        if discounts:
+            result["discounts"] = discounts
+
         return result
+
+    def build_discounts(self, order: "Order", cart: Optional["Cart"] = None) -> list | None:
+        """What the cart takes off its items, as one amount_off coupon; None when it takes nothing off.
+
+        Item lines charge the unit price times the quantity. The coupon is the gap between that and the cart's item
+        total, which is net of the cart discount, of gifts (a gift line keeps its product's unit price) and of a
+        voucher the voucher module takes off the total. A Checkout session takes one coupon, so they share it.
+        """
+        order_dto = cart.as_data if cart else order.as_data
+        charged = sum(self._unit_amount(item) * int(item.quantity) for item in order_dto.cart.items)
+        amount_off = charged - self.price_to_lowest_value(order_dto.cart.total_price)
+        if amount_off <= 0:
+            return None
+        return [{"coupon": self._create_coupon(order, order_dto, amount_off).id}]
+
+    def _create_coupon(self, order: "Order", order_dto, amount_off: int):
+        language_code = order_dto.language_code if hasattr(order_dto, "language_code") else "en"
+        return stripe.Coupon.create(
+            amount_off=amount_off,
+            currency=self._currency(order_dto),
+            duration="once",
+            max_redemptions=1,
+            # Past the 24 h a Checkout session lives, so it cannot expire under a paying customer.
+            redeem_by=int((timezone.now() + timedelta(hours=48)).timestamp()),
+            name=self.get_localized_name("discount", language_code, "Discount"),
+            metadata={"order_idx": str(order.order_id)},
+            # A retried order reuses its coupon; one of another amount (the cart changed) is a new coupon.
+            idempotency_key=f"order-discount-{order.order_id}-{amount_off}",
+            api_key=self.payment_method.additional_data["api_key"],
+        )
+
+    def _unit_amount(self, item) -> int:
+        """The sold unit price. Stripe multiplies it by the quantity; the line's discount goes into the coupon."""
+        return self.price_to_lowest_value(item.unit_price)
+
+    def _currency(self, order_dto) -> str:
+        if isinstance(order_dto.currency_code, str):
+            return order_dto.currency_code.lower()
+        return self.payment_method.channel.default_currency.iso3.lower()
 
     def map_buyer(self, order: "Order") -> dict:
         order_dto = order.as_data
@@ -209,11 +257,7 @@ class StripePaymentProvider(BasePaymentProvider, ProcessLoggerMixin):
         the tax portion from the total amount.
         """
         order_dto = cart.as_data if cart else order.as_data
-        currency = (
-            order_dto.currency_code.lower()
-            if isinstance(order_dto.currency_code, str)
-            else self.payment_method.channel.default_currency.iso3.lower()
-        )
+        currency = self._currency(order_dto)
 
         line_items = []
         use_automatic_tax = self.is_automatic_tax_enabled()
@@ -226,7 +270,7 @@ class StripePaymentProvider(BasePaymentProvider, ProcessLoggerMixin):
                 "price_data": {
                     "currency": currency,
                     "product_data": {"name": name, "metadata": {"sku": product_dto.sku}},
-                    "unit_amount": self.price_to_lowest_value(product_dto.unit_price - product_dto.discount_amount),
+                    "unit_amount": self._unit_amount(product_dto),
                     "tax_behavior": "inclusive",
                 },
                 "quantity": int(product_dto.quantity),
