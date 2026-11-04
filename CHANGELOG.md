@@ -4,6 +4,10 @@
 
 ### Security
 
+- A `free_order` payment method settles only a cart with nothing left to pay (after vouchers and fees). With an
+  amount due the cart is invalid with `free_order_amount_due` (v2 `FREE_ORDER_AMOUNT_DUE`, client-visible
+  addition), the payment method list no longer offers `free_order`, and `Order.create` refuses on its own. Customer
+  groups and product links still narrow who sees the method; they no longer make a paid cart free.
 - PayPal: `notify/paypal/` changes a payment only when PayPal confirms the notification's signature
   (verify-webhook-signature, against the `webhook_id` in the payment method's `additional_data`) and the payment
   belongs to a PayPal payment method. Anything else is answered 403 and writes nothing; PayPal redelivers it. The
