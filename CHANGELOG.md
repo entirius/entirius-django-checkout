@@ -2,8 +2,17 @@
 
 ## Unreleased
 
+### Added
+
+- `django_checkout.output.quantities.get_bundle_quantities(skus, channel_idx)`: how many of each bundle its
+  components allow, as the cart counts a bundle line (the bundle's own Stock row does not decide; with limits, the
+  required and default components). For other modules that answer stock, so a bundle they report available is one
+  the cart accepts. SKUs that are not bundles are left out.
+
 ### Fixed
 
+- A bundle counts all of its components when several bundles are checked at once. The links were grouped by
+  adjacent rows of an unordered query, so a bundle whose links came apart kept only the last group of them.
 - v2 API (client-visible): `gratis.rules` of a cart lists the gift rules, as `GET carts/{id}/gratis-rules/` does. It was
   read from `gratis_rules`, a legacy field nothing fills, so it stayed empty next to `is_available: true`.
 - v2 OpenAPI (client-visible, schema only): `POST orders/` lists `payment_error` in `OrderCreateResponse`. The 201 body
