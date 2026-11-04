@@ -31,6 +31,10 @@ def is_allowed_bridge_target(parsed: ParseResult) -> bool:
         return False
     if parsed.scheme not in WEB_SCHEMES:
         return True
+    # A browser reads a backslash as "/" in a web URL, urlparse does not: with a backslash before "@" urlparse
+    # takes the host after "@" (shop.example) while the browser goes to the one before it (evil.com).
+    if "\\" in parsed.netloc:
+        return False
     # hostname, not netloc: urlparse("https://shop.example@evil.com/").netloc still
     # contains "shop.example", but the browser navigates to evil.com. hostname is the
     # destination that actually matters, already lowercased and stripped of the port.

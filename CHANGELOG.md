@@ -4,6 +4,11 @@
 
 ### Security
 
+- The payment bridge refuses a web target with a backslash in its host part (`https://evil.example\@shop.example/`):
+  the host check read `shop.example` there, while a browser reads the backslash as `/` and opens `evil.example`.
+  Only deployments that send web return URLs through the bridge (`https` left out of
+  `PAYMENT_REDIRECT_DIRECT_SCHEMES`) were open to it.
+
 - A `free_order` payment method settles only a cart with nothing left to pay (after vouchers and fees). With an
   amount due the cart is invalid with `free_order_amount_due` (v2 `FREE_ORDER_AMOUNT_DUE`, client-visible
   addition), the payment method list no longer offers `free_order`, and `Order.create` refuses on its own. Customer

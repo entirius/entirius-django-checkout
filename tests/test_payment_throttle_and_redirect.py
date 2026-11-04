@@ -341,6 +341,13 @@ def test_userinfo_cannot_disguise_the_real_host(bridge_config):
     assert is_allowed_bridge_target(urlparse("https://shop.example@evil.example/")) is False
 
 
+def test_a_backslash_cannot_disguise_the_real_host(bridge_config):
+    """urlparse gives the hostname shop.example; the browser reads the backslash as "/" and goes to evil.example."""
+    bridge_config(["https"], ["shop.example"])
+
+    assert is_allowed_bridge_target(urlparse("https://evil.example\\@shop.example/")) is False
+
+
 def test_native_app_scheme_needs_no_host(bridge_config):
     """exp://192.168.1.5:19000 varies per developer machine — the scheme is the control."""
     bridge_config(["exp"], [])
