@@ -73,9 +73,12 @@
 
 ### Fixed
 
+- The PayPal `webhook_id` warning (`django_checkout.W002`) reaches the CMS: it carries the `entirius_config` tag
+  django-munin collects, and names the methods in its hint.
 - Stripe: `notify/stripe/` stores the checkout session as plain JSON. With stripe 12 or later (the lock pins 15) a
   `StripeObject` is no dict, so saving it in `provider_notify` raised and every verified session event answered
   500 without changing the payment.
+
 - PayPal: the buyer's return (`return/paypal/`) saves the status PayPal's capture API reports on the payment and
   the order. It answered 500 after the capture and saved nothing, so only the webhook confirmed PayPal orders.
 ### Added
