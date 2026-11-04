@@ -73,6 +73,11 @@
 
 ### Fixed
 
+- An order paid with a voucher and another method debits the voucher before any gateway is asked: with the gateway
+  listed first its session existed before the debit, and a debit that failed rolled the order back while the session
+  stayed payable. Cash on delivery and free order come from the method that pays the rest, not from entry `[0]`: a
+  voucher with cash on delivery left the order `unpaid` instead of `confirmed`. The free-order check of
+  `Order.create` reads that method too.
 - A gateway paid next to a voucher (`payment_method` `[voucher, gateway]`) reads its own entry of the list, not
   entry `[0]`, which is the voucher's. PayU (`payu`, `payu_card`, `payu_blik`) and Stripe got no return URL
   (`continueUrl`, `success_url`; Stripe refuses a session without one) and PayU card no card token. BLIK sent the
