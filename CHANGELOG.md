@@ -22,6 +22,7 @@
 - Stripe: `notify/stripe/` verifies an event only with a non-empty `endpoint_secret` of the channel's Stripe
   payment method; without one the event is answered 400. The view no longer sets the process-wide
   `stripe.api_key`, and a request without a `Stripe-Signature` header is answered 400 instead of 500.
+- Stripe: a verified event changes only a Stripe payment of the channel whose endpoint secret verified it.
 
 ### Upgrade notes
 

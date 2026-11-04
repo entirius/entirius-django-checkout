@@ -5,7 +5,8 @@
 """Stripe checkout session events: which ones may change a payment, and how far.
 
 An event is verified with the endpoint secret of the channel in the URL; without a non-empty
-secret nothing is verified, so nothing passes.
+secret nothing is verified, so nothing passes. A verified event reaches only a Stripe payment of
+that channel.
 
 Events are signed the way Stripe signs them (``t=...,v1=HMAC-SHA256``) and go through the real
 ``stripe.Webhook.construct_event``; nothing leaves the test.
@@ -155,6 +156,35 @@ def test_event_without_a_valid_signature_is_rejected(channel, customer, stripe_m
     payment_intent = _intent(channel, customer, stripe_method)
 
     response = _notify(channel, header=header)
+
+    assert response.status_code == 400
+    assert _state(payment_intent) == UNTOUCHED
+
+
+# --- The endpoint secret belongs to one channel and one gateway ----------------------------
+
+
+@pytest.mark.django_db
+def test_event_verified_for_one_channel_cannot_touch_another_channels_payment(
+    channel, other_channel, customer, stripe_method
+):
+    other_method = _stripe_method(other_channel, endpoint_secret="synthetic-other-secret")
+    payment_intent = _intent(other_channel, customer, other_method)
+
+    response = _notify(channel)
+
+    assert response.status_code == 400
+    assert _state(payment_intent) == UNTOUCHED
+
+
+@pytest.mark.django_db
+def test_event_cannot_touch_another_gateways_payment(channel, customer, stripe_method):
+    payu_method = PaymentMethod.objects.create(
+        channel=channel, code="payu", provider=PaymentProvider.PAYU, name_t9n={"en": "PayU"}
+    )
+    payment_intent = _intent(channel, customer, payu_method)
+
+    response = _notify(channel)
 
     assert response.status_code == 400
     assert _state(payment_intent) == UNTOUCHED

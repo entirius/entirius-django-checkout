@@ -71,7 +71,11 @@ def stripe_notify(request: WSGIRequest, channel_idx: str = None, *args, **kwargs
 
         # Validation: do we have valid PaymentIntent object?
         stripe_order_id = stripe_checkout["id"]
-        payment_intent: PaymentIntent = PaymentIntent.objects.filter(external_order_id=stripe_order_id).first()
+        # The event was verified with the secret of the channel in the URL, so only a Stripe payment of
+        # that channel may follow it.
+        payment_intent: PaymentIntent = PaymentIntent.objects.filter(
+            external_order_id=stripe_order_id, order__channel__idx=channel_idx, method__provider=PaymentProvider.STRIPE
+        ).first()
         if not payment_intent:
             extra = {"stripe_order_id": stripe_order_id, "stripe_response": stripe_checkout, "is_status_changed": False}
             logger_process.add_log_param("stripe_order_id", stripe_checkout)
