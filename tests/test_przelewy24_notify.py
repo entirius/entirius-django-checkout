@@ -6,7 +6,8 @@
 
 A notification reaches only a Przelewy24 payment, and is verified with that payment's own method.
 Its ``sign`` (SHA-384 over the documented fields and the CRC key) must match before Przelewy24 is
-asked to verify the transaction.
+asked to verify the transaction. A verified payment completes the order only while it waits for
+payment (``domain/payment_provider/notification_state.py``).
 
 Przelewy24 is never called: the provider's ``verify_transaction_payment`` is replaced, and any
 other outbound HTTP fails the test.
@@ -256,3 +257,49 @@ def test_statement_with_spaces_and_diacritics_is_signed_as_written(channel, cust
     assert response.status_code == 200
     assert len(verifications) == 1
     assert _state(payment_intent) == (PaymentIntentStatus.COMPLETE, OrderStatus.CONFIRMED)
+
+
+# --- A resent notification confirms nothing twice -----------------------------------------
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("order_status", [OrderStatus.IN_PROGRESS, OrderStatus.COMPLETED, OrderStatus.RETURNED])
+def test_resent_notification_leaves_an_order_that_moved_on(channel, customer, order_status):
+    payment_intent = _intent(channel, customer, payment_status=PaymentIntentStatus.COMPLETE, order_status=order_status)
+
+    response = _notify()
+
+    assert response.status_code == 200
+    assert _state(payment_intent) == (PaymentIntentStatus.COMPLETE, order_status)
+
+
+@pytest.mark.django_db
+def test_notification_keeps_an_order_moved_on_before_the_payment_was_recorded(channel, customer):
+    payment_intent = _intent(channel, customer, order_status=OrderStatus.IN_PROGRESS)
+
+    _notify()
+
+    assert _state(payment_intent) == (PaymentIntentStatus.COMPLETE, OrderStatus.IN_PROGRESS)
+
+
+@pytest.mark.django_db
+def test_bi_finish_tag_keeps_its_wording(channel, customer, monkeypatch):
+    """BI reports group notifications by finish tag; the state rules must not rename it."""
+    tags = []
+
+    class RecordingEvent:
+        def __init__(self, **kwargs):
+            pass
+
+        def finish_with_success(self, finish_tag, details=None):
+            tags.append(finish_tag)
+
+        def finish_with_error(self, finish_tag, details=None, error_message=None):
+            tags.append(finish_tag)
+
+    monkeypatch.setattr(przelewy24_views, "Checkout_Przelewy24NotifyEvent", RecordingEvent)
+    _intent(channel, customer)
+
+    _notify()
+
+    assert tags == ["PaymentIntent status completed"]

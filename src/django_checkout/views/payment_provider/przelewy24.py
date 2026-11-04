@@ -5,15 +5,17 @@
 import json
 
 from django.core.handlers.wsgi import WSGIRequest
+from django.db import transaction
 from django.views.decorators.csrf import csrf_exempt
 from django_utils.api.decorators import api_view, require_http_method
 from django_utils.api.responses import Response
 from process_logger import ProcessLogger
 
 from django_checkout.bi import Checkout_Przelewy24NotifyEvent
+from django_checkout.domain.payment_provider.notification_state import apply_payment_status, lock_payment_intent
 from django_checkout.domain.payment_provider.przelewy24_notification import crc_key_for, is_valid_notification
-from django_checkout.enums import OrderStatus, PaymentIntentStatus, PaymentProvider
-from django_checkout.models import Order, PaymentIntent
+from django_checkout.enums import PaymentIntentStatus, PaymentProvider
+from django_checkout.models import PaymentIntent
 
 logger_process = ProcessLogger("PAYMENT_PRZELEWY24_PROVIDER_NOTIFY")
 
@@ -108,13 +110,16 @@ def przelewy24_notify(request: WSGIRequest, *args, **kwargs):
         extra["error_message"] = str(e)
         bev.finish_with_error(finish_tag="Przelewy24 verify transaction error", details=extra)
         return Response(data={"message": "For more information see log"}, status="FAIL", status_code=500)
-    payment_intent.payment_status = PaymentIntentStatus.COMPLETE
-    payment_intent.save()
-    order: Order = payment_intent.order
-    order.order_status = OrderStatus.CONFIRMED
-    order.save()
-    extra["is_status_changed"] = True
+    # A resent notification verifies again at Przelewy24; it must not re-confirm an order that moved
+    # on (that fires order_confirmed_signal again). Rules: notification_state.
+    with transaction.atomic():
+        payment_intent = lock_payment_intent(payment_intent)
+        payment_intent.provider_notify = body
+        outcome = apply_payment_status(payment_intent, PaymentIntentStatus.COMPLETE)
+    extra["is_status_changed"] = outcome.changed
     extra["order_status"] = payment_intent.order.order_status
     extra["payment_status"] = payment_intent.payment_status
-    bev.finish_with_success(finish_tag="PaymentIntent status completed", details=extra)
+    # BI reports group by finish tag: a confirmed order keeps the wording it always had.
+    finish_tag = "PaymentIntent status completed" if outcome.order_changed else outcome.message
+    bev.finish_with_success(finish_tag=finish_tag, details=extra)
     return Response(data={"message": "PaymentIntent status completed"}, status="OK", status_code=200)

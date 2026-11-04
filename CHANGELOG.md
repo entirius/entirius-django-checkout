@@ -16,6 +16,9 @@
   records a cancellation only: for an approved or completed PayPal order it changes nothing and captures nothing.
   BI finish tags keep their wording; new outcomes add their own (`..., Order status <status> kept`,
   `PaymentIntent is already <status>, <status> ignored`).
+- Przelewy24: a verified notification completes the payment through the same rules: a resent notification of a
+  paid transaction no longer puts an order in progress, completed or returned back to CONFIRMED. The BI finish tag
+  of a confirmed order keeps its wording.
 - Paynow: notifications go through the same rules: a late or repeated status no longer pulls a COMPLETE payment
   back, re-confirms an order that moved on, or cancels an order confirmed by hand. BI finish tags keep their wording.
 
