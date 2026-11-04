@@ -8,6 +8,8 @@
   admin discount routes answered any `ValueError` / `ObjectDoesNotExist` from below with its text as a 400 / 404
   `message`; the cart (v1 and v2) carried the text of a `ValueError` from the delivery price lookup in the shipping
   message (`Error while getting delivery prices: <exception>.`).
+- CI: the workflow token is read-only (`permissions: contents: read`; CodeQL `actions/missing-workflow-permissions`,
+  3 alerts).
 
 ### Changed
 
