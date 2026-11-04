@@ -26,6 +26,8 @@
 - Paynow: notifications go through the same rules: a late or repeated status no longer pulls a COMPLETE payment
   back, re-confirms an order that moved on, or cancels an order confirmed by hand. BI finish tags keep their wording.
 
+- Paynow: `notify/paynow/` changes only a Paynow payment (another gateway's payment is answered 404, like any other
+  refused notification), and the `Signature` header is compared in constant time.
 - Przelewy24: `notify/przelewy24/` changes only a Przelewy24 payment: a notification naming another gateway's
   payment is answered 403 before Przelewy24 is asked, and a body needs both `orderId` and `sessionId`. The verify
   call uses the payment's own method, not the first method listed on the order (with a voucher listed first it
@@ -78,9 +80,21 @@
   then overwritten with the item's earlier discount, so the code came out valid at 0. The item is picked by price
   among the bought lines: a gift line, always the cheapest at the gift price, is never picked, and a line with more
   units no longer wins over a cheaper (or dearer) one; quantity only breaks a price tie.
+- Merging a guest cart into the customer's cart no longer fails, v1 (`carts/{id}/merge/`) and v2
+  (`POST carts/{id}/merge/`). `CartRequest.factory()` left out five fields the request requires
+  (`custom_order_id`, `requested_delivery_date`, `split_order`, `affiliate_code`, `customer_ip`), so every merge
+  raised `TypeError`: v2 answered 500, v1 500 `Internal Exception`. A gift line is no longer summed into the merged
+  quantities as a bought unit: the customer's gift comes back from its code, and a guest's gift goes with the guest's
+  codes, which a merge does not carry over. A guest cart that already became an order (or is no longer open) answers
+  404 and stays as it is; deleting it after the merge raised `ProtectedError`, another 500. v1 merges through the
+  same service as v2, so it keeps each line's `extra` and `voucher_gift` as v2 does.
+- The PayPal `webhook_id` warning (`django_checkout.W002`) reaches the CMS: it carries the `entirius_config` tag
+  django-munin collects, and names the methods in its hint.
+
 - Stripe: `notify/stripe/` stores the checkout session as plain JSON. With stripe 12 or later (the lock pins 15) a
   `StripeObject` is no dict, so saving it in `provider_notify` raised and every verified session event answered
   500 without changing the payment.
+
 - PayPal: the buyer's return (`return/paypal/`) saves the status PayPal's capture API reports on the payment and
   the order. It answered 500 after the capture and saved nothing, so only the webhook confirmed PayPal orders.
 ### Added
