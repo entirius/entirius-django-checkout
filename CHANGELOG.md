@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Security
+
+- A `free_order` payment method settles only a cart with nothing left to pay (after vouchers and fees). With an
+  amount due the cart is invalid with `free_order_amount_due` (v2 `FREE_ORDER_AMOUNT_DUE`, client-visible
+  addition), the payment method list no longer offers `free_order`, and `Order.create` refuses on its own. Customer
+  groups and product links still narrow who sees the method; they no longer make a paid cart free.
+
 ## 10.0.1 — 2026-10-27
 
 ### Added
