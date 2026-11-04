@@ -5,6 +5,7 @@
 import json
 import logging
 
+from django.db import transaction
 from django.db.utils import IntegrityError
 from django.utils import timezone
 from django_pim.models import Attribute, Feature, Product, ProductCategory
@@ -18,6 +19,7 @@ from django_checkout.models import (
     ShippingMethod,
 )
 from django_checkout.models.discount_rule_code import ModifiersForDiscountRule
+from django_checkout.services.code_clashes import DiscountCodeClash, Scope, refuse_clash, refuse_scope_change
 from django_checkout.utils.importer import better_read_from_csv
 
 logger = logging.getLogger(__name__)
@@ -57,7 +59,15 @@ def creating_in_db_for_each_line(data):
                     "extra_value": extra_value,
                 },
             )
-            rule.channels.set(channels)
+            before = Scope.of(rule)
+            try:
+                with transaction.atomic():
+                    rule.channels.set(channels)
+                    refuse_scope_change(rule, before, Scope.of(rule), field="channels")
+            except DiscountCodeClash as exc:
+                error_rows += 1
+                logger.warning("Skipped discount rule row %s: %s", row["name"], exc.clash.describe())
+                continue
             try:
                 rule.save()
                 free_shipping_methods_codes = (
@@ -73,7 +83,7 @@ def creating_in_db_for_each_line(data):
             while is_more_modes_of_action:
                 try:
                     if not row.get(f"is_inclusion_or_exclusion_{n}", None):
-                        continue
+                        break  # the row has no more modes of action
 
                     mode_of_action = DiscountModeOfAction(
                         rule=rule,
@@ -128,6 +138,7 @@ def creating_in_db_for_each_line(data):
                     if row[f"code_{n}"] is None:
                         n += 1
                     else:
+                        refuse_clash(row[f"code_{n}"], rule, field=f"code_{n}")
                         code = DiscountCode(
                             rule=rule,
                             code=row[f"code_{n}"],
@@ -150,6 +161,9 @@ def creating_in_db_for_each_line(data):
                         )
                         code.save()
                         n += 1
+                except DiscountCodeClash as exc:
+                    logger.warning("Skipped discount code of row %s: %s", row["name"], exc.clash.describe())
+                    n += 1
                 except KeyError:
                     is_more_codes = False
                 except Exception as e:

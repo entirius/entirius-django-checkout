@@ -12,7 +12,7 @@ Key toggles (defaults in parentheses): `USE_PRICE_TUNER_IN_CHECKOUT` (False),
 `USE_VALIDATE_ITEMS_SIGNAL` (True), `USE_VALIDATE_VOUCHERS_SIGNAL` (False — flip to True in
 services that install django-checkout-voucher), `CUSTOMS_THRESHOLD_ENABLED` (False),
 `USE_CACHED_VIEWS` (False), `ADD_MAX_AVAILABLE_QUANTITY` (True), `GRATIS_MECHANISM` (1),
-`AUTOPAY_HASH_KEY` (None), `GLOBAL_STOCK_RESERVATION_CHANNELS` ([]; a single-element list raises).
+`AUTOPAY_HASH_KEY` (None; `{channel_idx: hash key}`, an Autopay ITN of a channel without a non-empty key is refused), `GLOBAL_STOCK_RESERVATION_CHANNELS` ([]; a single-element list raises).
 
 ## Soft integrations (optional extras)
 
