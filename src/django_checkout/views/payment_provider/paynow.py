@@ -2,6 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+import hmac
 import json
 
 from django.core.handlers.wsgi import WSGIRequest
@@ -13,7 +14,7 @@ from paynow_sdk import PayNow
 from process_logger import ProcessLogger
 
 from django_checkout.domain.payment_provider.notification_state import apply_payment_status, lock_payment_intent
-from django_checkout.enums import PaymentIntentStatus
+from django_checkout.enums import PaymentIntentStatus, PaymentProvider
 from django_checkout.models import PaymentIntent
 
 from ...bi import Checkout_PayNowNotifyEvent
@@ -62,6 +63,15 @@ def paynow_notify(request: WSGIRequest, *args, **kwargs):
         bev.finish_with_error(finish_tag="Can not find related PaymentIntent object", details=extra)
         return Response(data={"message": "For more information see log"}, status="FAIL", status_code=404)
 
+    # The paymentId comes from the request: it may name another gateway's payment.
+    if payment_intent.method is None or payment_intent.method.provider != PaymentProvider.PAYNOW:
+        extra = {"paynow_order_id": paynow_order_id, "payment_intent_pk": payment_intent.pk, "is_status_changed": False}
+        logger_process.add_log_param_once("paynow_order_id", paynow_order_id)
+        logger_process.add_log_param_once("payment_intent_pk", payment_intent.pk)
+        logger_process.error("PaymentIntent is not a PayNow payment, notification ignored")
+        bev.finish_with_error(finish_tag="PayNow notification rejected", details=extra)
+        return Response(data={"message": "For more information see log"}, status="FAIL", status_code=404)
+
     # Validation: do we have valid status field in response?
     if "status" not in body:
         extra = {"paynow_order_id": paynow_order_id, "paynow_response": body, "is_status_changed": False}
@@ -88,7 +98,7 @@ def paynow_notify(request: WSGIRequest, *args, **kwargs):
     signature_header = request.headers.get("Signature")
     signature_calculated = paynow.authorization.calculate_signature(body=body, parameters={}, is_notification=True)
 
-    if not signature_header or signature_calculated != signature_header:
+    if not signature_header or not hmac.compare_digest(signature_calculated.encode(), signature_header.encode()):
         extra = {"paynow_order_id": paynow_order_id, "paynow_response": body, "is_status_changed": False}
         logger_process.add_log_param("paynow_order_id", paynow_order_id)
         logger_process.add_log_param("paynow_response", body)
