@@ -73,6 +73,13 @@
 
 ### Fixed
 
+- Stripe: a line of several units with a cart discount is charged its discounted total. Its `unit_amount` was the
+  unit price less the discount of the whole line, and Stripe multiplies `unit_amount` by the quantity: 3 x 54.99 at
+  15 % off charged 90.72 instead of 140.22, and a large discount sent a negative amount Stripe refused. Lines carry
+  the sold unit price; what the cart takes off its items (cart discounts, a gift's price, a voucher taken off the
+  total) goes into one `amount_off` coupon per session, single use, in the order's currency, on the payment method's
+  account. A gift was charged its product's full price, and a voucher on top of the card. The coupon is named by
+  `localized_names.discount` in the method's `additional_data` (default `Discount`).
 - Merging a guest cart into the customer's cart no longer fails, v1 (`carts/{id}/merge/`) and v2
   (`POST carts/{id}/merge/`). `CartRequest.factory()` left out five fields the request requires
   (`custom_order_id`, `requested_delivery_date`, `split_order`, `affiliate_code`, `customer_ip`), so every merge
