@@ -11,7 +11,7 @@ from django_utils.api.responses import Response
 from process_logger import ProcessLogger
 
 from django_checkout.bi import Checkout_Przelewy24NotifyEvent
-from django_checkout.enums import OrderStatus, PaymentIntentStatus
+from django_checkout.enums import OrderStatus, PaymentIntentStatus, PaymentProvider
 from django_checkout.models import Order, PaymentIntent
 
 logger_process = ProcessLogger("PAYMENT_PRZELEWY24_PROVIDER_NOTIFY")
@@ -35,7 +35,7 @@ def przelewy24_notify(request: WSGIRequest, *args, **kwargs):
         )
         return Response(data={"message": "For more information see log"}, status="FAIL", status_code=500)
 
-    if "orderId" not in body:
+    if "orderId" not in body or "sessionId" not in body:
         extra = {"przelewy24_response": body, "is_status_changed": False}
         logger_process.add_log_param("przelewy24_response", body)
         logger_process.add_log_param("is_status_changed", False)
@@ -56,6 +56,16 @@ def przelewy24_notify(request: WSGIRequest, *args, **kwargs):
         bev.finish_with_error(finish_tag="Can not find related PaymentIntent object", details=extra)
         return Response(data={"message": "For more information see log"}, status="FAIL", status_code=500)
 
+    # The sessionId comes from the request: it may name another gateway's payment.
+    method = payment_intent.method
+    if method is None or method.provider != PaymentProvider.PRZELEWY24:
+        extra = {"przelewy24_order_id": przelewy24_order_id, "payment_intent_pk": payment_intent.pk}
+        logger_process.add_log_param_once("przelewy24_order_id", przelewy24_order_id)
+        logger_process.add_log_param_once("payment_intent_pk", payment_intent.pk)
+        logger_process.error("PaymentIntent is not a Przelewy24 payment, notification ignored")
+        bev.finish_with_error(finish_tag="Przelewy24 notification rejected", details=extra)
+        return Response(data={"message": "Notification rejected"}, status="FAIL", status_code=403)
+
     payment_intent.provider_notify = body
     extra = {
         "order_id": payment_intent.order.order_id,
@@ -69,7 +79,8 @@ def przelewy24_notify(request: WSGIRequest, *args, **kwargs):
     }
     logger_process.set_log_params({"details": extra})
     try:
-        verify = payment_intent.order.selected_payment_method.get_provider()
+        # The payment's own method: the order's first selected method may be another one (a voucher).
+        verify = method.get_provider()
         # przypadku udanej weryfikacji dostajemy status "success" oraz responseCode: 0
         response_body = verify.verify_transaction_payment(body)
         if "data" not in response_body:

@@ -1,0 +1,178 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+"""Przelewy24 notifications: which ones may change a payment, and how far.
+
+A notification reaches only a Przelewy24 payment, and is verified with that payment's own method.
+
+Przelewy24 is never called: the provider's ``verify_transaction_payment`` is replaced, and any
+other outbound HTTP fails the test.
+"""
+
+import hashlib
+import json
+
+import pytest
+import requests
+from django.test import RequestFactory
+
+from django_checkout.domain.payment_provider.przelewy24_payment_provider import Przelewy24PaymentProvider
+from django_checkout.enums import OrderStatus, PaymentIntentStatus, PaymentProvider
+from django_checkout.models import Order, PaymentIntent, PaymentMethod
+from django_checkout.views.payment_provider import przelewy24 as przelewy24_views
+
+factory = RequestFactory()
+
+SESSION_ID = "SESSION-001"
+CRC_KEY = "synthetic-crc-key"
+SIGNED_FIELDS = (
+    "merchantId",
+    "posId",
+    "sessionId",
+    "amount",
+    "originAmount",
+    "currency",
+    "orderId",
+    "methodId",
+    "statement",
+)
+
+
+def _sign(body: dict, crc_key: str = CRC_KEY) -> str:
+    """Przelewy24's documented formula, written out independently of the module under test."""
+    payload = {field: body[field] for field in SIGNED_FIELDS} | {"crc": crc_key}
+    return hashlib.sha384(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+
+
+@pytest.fixture(autouse=True)
+def order_methods(monkeypatch):
+    """An order lists its payment methods in its body; these orders list their intents' methods, in order."""
+    monkeypatch.setattr(
+        Order,
+        "selected_payment_methods",
+        property(lambda order: [pi.method for pi in order.payment_items.order_by("pk")]),
+    )
+
+
+@pytest.fixture(autouse=True)
+def verifications(monkeypatch):
+    """Notification bodies sent to Przelewy24's verify API; it confirms each of them."""
+    sent = []
+
+    def verify(self, body):
+        sent.append(body)
+        return {"data": {"status": "success"}, "responseCode": 0}
+
+    def no_network(session, method, url, **kwargs):
+        raise AssertionError(f"Unexpected outbound call in a test: {method} {url}")
+
+    monkeypatch.setattr(Przelewy24PaymentProvider, "verify_transaction_payment", verify)
+    monkeypatch.setattr(requests.sessions.Session, "request", no_network)
+    return sent
+
+
+def _notify(sign_with=CRC_KEY, **overrides):
+    body = {
+        "merchantId": 1,
+        "posId": 1,
+        "sessionId": SESSION_ID,
+        "amount": 1000,
+        "originAmount": 1000,
+        "currency": "PLN",
+        "orderId": 123456,
+        "methodId": 1,
+        "statement": "p24-SYNTHETIC",
+    }
+    body.update(overrides)
+    body = {key: value for key, value in body.items() if value is not None}
+    if sign_with is not None and "sign" not in body and all(field in body for field in SIGNED_FIELDS):
+        body["sign"] = _sign(body, sign_with)
+    request = factory.post("/notify/przelewy24/", data=json.dumps(body), content_type="application/json")
+    return przelewy24_views.przelewy24_notify(request)
+
+
+def _method(channel, provider=PaymentProvider.PRZELEWY24, crc_key=CRC_KEY, code=None):
+    return PaymentMethod.objects.create(
+        channel=channel,
+        code=code or str(provider),
+        provider=provider,
+        name_t9n={"en": str(provider)},
+        additional_data={"client_id": "1", "client_secret": "x", "crc_key": crc_key},
+    )
+
+
+def _intent(
+    channel,
+    customer,
+    provider=PaymentProvider.PRZELEWY24,
+    payment_status=PaymentIntentStatus.PENDING,
+    order_status=OrderStatus.UNPAID,
+    crc_key=CRC_KEY,
+    order=None,
+):
+    method = _method(channel, provider, crc_key)
+    order = order or Order.objects.create(channel=channel, customer=customer, order_status=order_status, order_body={})
+    return PaymentIntent.objects.create(
+        order=order, method=method, code=method.code, external_order_id=SESSION_ID, payment_status=payment_status
+    )
+
+
+def _state(payment_intent):
+    payment_intent.refresh_from_db()
+    payment_intent.order.refresh_from_db()
+    return payment_intent.payment_status, payment_intent.order.order_status
+
+
+UNTOUCHED = (PaymentIntentStatus.PENDING, OrderStatus.UNPAID)
+
+
+@pytest.mark.django_db
+def test_paid_notification_confirms_an_order_waiting_for_payment(channel, customer, verifications):
+    payment_intent = _intent(channel, customer)
+
+    response = _notify()
+
+    assert response.status_code == 200
+    assert len(verifications) == 1
+    assert _state(payment_intent) == (PaymentIntentStatus.COMPLETE, OrderStatus.CONFIRMED)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("provider", [PaymentProvider.PAYU, PaymentProvider.STRIPE])
+def test_notification_cannot_touch_another_gateways_payment(channel, customer, verifications, provider):
+    payment_intent = _intent(channel, customer, provider=provider)
+
+    response = _notify()
+
+    assert response.status_code == 403
+    assert verifications == []
+    assert _state(payment_intent) == UNTOUCHED
+
+
+@pytest.mark.django_db
+def test_body_without_session_id_is_rejected_without_asking_przelewy24(channel, customer, verifications):
+    payment_intent = _intent(channel, customer)
+
+    response = _notify(sessionId=None)
+
+    assert response.status_code == 500
+    assert verifications == []
+    assert _state(payment_intent) == UNTOUCHED
+
+
+@pytest.mark.django_db
+def test_verification_uses_the_payments_own_method(channel, customer, verifications):
+    """With a voucher listed first on the order, the order's first method is not the one Przelewy24 paid."""
+    order = Order.objects.create(channel=channel, customer=customer, order_status=OrderStatus.UNPAID, order_body={})
+    voucher = _method(channel, PaymentProvider.VOUCHER)
+    PaymentIntent.objects.create(
+        order=order, method=voucher, code=voucher.code, external_order_id="VOUCHER-001", payment_status="complete"
+    )
+    payment_intent = _intent(channel, customer, order=order)
+
+    response = _notify()
+
+    assert response.status_code == 200
+    assert len(verifications) == 1
+    assert _state(payment_intent) == (PaymentIntentStatus.COMPLETE, OrderStatus.CONFIRMED)
