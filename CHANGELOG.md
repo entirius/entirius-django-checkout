@@ -20,11 +20,21 @@
   records a cancellation only: for an approved or completed PayPal order it changes nothing and captures nothing.
   BI finish tags keep their wording; new outcomes add their own (`..., Order status <status> kept`,
   `PaymentIntent is already <status>, <status> ignored`).
+- Stripe: checkout session events go through the same rules: a late or repeated event no longer pulls a COMPLETE
+  payment back, re-confirms an order that moved on, or cancels an order confirmed by hand and releases its stock.
+  An unhandled `payment_status` on an open payment still sets ERROR and answers 400. BI finish tags keep their
+  wording.
 - PayU: signed notifications (`payu`, `payu_card`, `payu_blik`) go through the same rules: a late or repeated status
   no longer pulls a COMPLETE payment back, re-confirms an order that moved on, or cancels an order confirmed by hand
   and releases its stock. BI finish tags keep their wording.
+
 - Paynow: notifications go through the same rules: a late or repeated status no longer pulls a COMPLETE payment
   back, re-confirms an order that moved on, or cancels an order confirmed by hand. BI finish tags keep their wording.
+
+- Stripe: `notify/stripe/` verifies an event only with a non-empty `endpoint_secret` of the channel's Stripe
+  payment method; without one the event is answered 400. The view no longer sets the process-wide
+  `stripe.api_key`, and a request without a `Stripe-Signature` header is answered 400 instead of 500.
+- Stripe: a verified event changes only a Stripe payment of the channel whose endpoint secret verified it.
 
 ### Upgrade notes
 
@@ -35,6 +45,9 @@
 
 ### Fixed
 
+- Stripe: `notify/stripe/` stores the checkout session as plain JSON. With stripe 12 or later (the lock pins 15) a
+  `StripeObject` is no dict, so saving it in `provider_notify` raised and every verified session event answered
+  500 without changing the payment.
 - PayPal: the buyer's return (`return/paypal/`) saves the status PayPal's capture API reports on the payment and
   the order. It answered 500 after the capture and saved nothing, so only the webhook confirmed PayPal orders.
 ### Added
