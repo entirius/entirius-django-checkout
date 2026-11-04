@@ -9,6 +9,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from django_checkout.domain.payment_selection import settling_payment_method
 from django_checkout.enums import ItemStatus
 from django_checkout.schemas.common import format_money, format_tax_rate
 from django_checkout.schemas.responses.address import AddressesResponse
@@ -433,8 +434,9 @@ class CartV2Response(BaseModel):
             items=items,
             addresses=AddressesResponse.from_domain(checkout_data.addresses),
             shipping_method=ShippingInCartResponse.from_domain(checkout_data.shipping_method),
+            # The method that settles the rest: it carries the fee and cash on delivery; entry [0] may be a voucher.
             payment_method=PaymentInCartResponse.from_domain(
-                checkout_data.primary_payment_method, fee_price=fee_price, fee_tax_rate=fee_tax_rate
+                settling_payment_method(checkout_data.payment_method), fee_price=fee_price, fee_tax_rate=fee_tax_rate
             ),
             discounts=discounts,
             total_discount_gross=format_money(discount_gross),
