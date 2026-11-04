@@ -16,6 +16,9 @@
   records a cancellation only: for an approved or completed PayPal order it changes nothing and captures nothing.
   BI finish tags keep their wording; new outcomes add their own (`..., Order status <status> kept`,
   `PaymentIntent is already <status>, <status> ignored`).
+- PayU: signed notifications (`payu`, `payu_card`, `payu_blik`) go through the same rules: a late or repeated status
+  no longer pulls a COMPLETE payment back, re-confirms an order that moved on, or cancels an order confirmed by hand
+  and releases its stock. BI finish tags keep their wording.
 - Paynow: notifications go through the same rules: a late or repeated status no longer pulls a COMPLETE payment
   back, re-confirms an order that moved on, or cancels an order confirmed by hand. BI finish tags keep their wording.
 
