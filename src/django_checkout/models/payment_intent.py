@@ -15,6 +15,9 @@ if TYPE_CHECKING:
     from django_checkout.models.payment_method import PaymentMethod
 
 
+PAYLOAD_FIELDS = ("provider_request", "provider_notify")
+
+
 class PaymentIntent(models.Model):
     order: "Order" = models.ForeignKey("Order", related_name="payment_items", on_delete=models.CASCADE)
     method: "PaymentMethod" = models.ForeignKey("PaymentMethod", null=True, blank=True, on_delete=models.SET_NULL)
@@ -37,22 +40,39 @@ class PaymentIntent(models.Model):
         # — one PaymentIntent per provider per order, but multiple providers OK.
         constraints = [models.UniqueConstraint(fields=["order", "code"], name="one_intent_per_order_code")]
 
-    def anonymize(self) -> bool:
-        """Keep only ids, amounts, statuses and timestamps of the gateway payloads, redact the payment link.
+    def save(self, *args, **kwargs) -> None:
+        # Data minimisation: a payload is stored only through the allowlist (ids, amounts, currencies, statuses,
+        # timestamps), whoever writes it. Providers verify signatures on the raw request, never on these copies.
+        update_fields = kwargs.get("update_fields")
+        for name in PAYLOAD_FIELDS:
+            if update_fields is None or name in update_fields:
+                setattr(self, name, scrub_gateway_payload(getattr(self, name)))
+        super().save(*args, **kwargs)
 
-        True if there was anything to do. The link is the gateway's payment page or, for BLIK, a copy of the body's
-        ``continue_url`` (redacted with the body); only the order's creation answer hands it out. The columns
-        (amount, currency, external_order_id, payment_status, code) stay: accounting needs them.
+    def reduce_payloads(self) -> list[str]:
+        """Put the payloads through the allowlist on the instance (not saved); the names of the ones that changed."""
+        changed = []
+        for name in PAYLOAD_FIELDS:
+            stored = getattr(self, name)
+            if (reduced := scrub_gateway_payload(stored)) != stored:
+                setattr(self, name, reduced)
+                changed.append(name)
+        return changed
+
+    def anonymize(self) -> bool:
+        """Reduce payloads stored before ``save()`` scrubbed them and redact the payment link; True if either changed.
+
+        The link is the gateway's payment page or, for BLIK, a copy of the body's ``continue_url`` (redacted with the
+        body); only the order's creation answer hands it out. The columns (amount, currency, external_order_id,
+        payment_status, code) stay: accounting needs them.
         """
-        holds_link = bool(self.redirect_url) and self.redirect_url != REDACTED
-        if self.provider_request is None and self.provider_notify is None and not holds_link:
-            return False
-        self.provider_request = scrub_gateway_payload(self.provider_request)
-        self.provider_notify = scrub_gateway_payload(self.provider_notify)
-        if holds_link:
+        changed = self.reduce_payloads()
+        if self.redirect_url and self.redirect_url != REDACTED:
             self.redirect_url = REDACTED
-        self.save(update_fields=["provider_request", "provider_notify", "redirect_url"])
-        return True
+            changed.append("redirect_url")
+        if changed:
+            self.save(update_fields=changed)
+        return bool(changed)
 
 
 #

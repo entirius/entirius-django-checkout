@@ -303,3 +303,28 @@ def test_bi_finish_tag_keeps_its_wording(channel, customer, monkeypatch):
     _notify()
 
     assert tags == ["PaymentIntent status completed"]
+
+
+# --- What is stored ---------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_stored_notification_keeps_ids_and_amounts_only(channel, customer, verifications):
+    """The sign is checked, and Przelewy24 asked, with the raw body; the payment keeps the allowlisted keys."""
+    payment_intent = _intent(channel, customer)
+
+    response = _notify()
+
+    assert response.status_code == 200
+    assert "sign" in verifications[0]
+    payment_intent.refresh_from_db()
+    assert payment_intent.provider_notify == {
+        "merchantId": 1,
+        "posId": 1,
+        "sessionId": SESSION_ID,
+        "amount": 1000,
+        "originAmount": 1000,
+        "currency": "PLN",
+        "orderId": 123456,
+        "methodId": 1,
+    }

@@ -323,17 +323,19 @@ def _at(payload, path):
 
 
 def _intent(order, code):
+    """A payment whose payloads were stored whole, as before every save went through the allowlist."""
     request, notify, _ = GATEWAYS[code]
-    return PaymentIntent.objects.create(
+    intent = PaymentIntent.objects.create(
         order=order,
         code=code,
         amount="123.00",
         currency="PLN",
         external_order_id=f"{code.upper()}-EXT-1",
         payment_status=PaymentIntentStatus.COMPLETE,
-        provider_request=request,
-        provider_notify=notify,
     )
+    PaymentIntent.objects.filter(pk=intent.pk).update(provider_request=request, provider_notify=notify)  # no save()
+    intent.refresh_from_db()
+    return intent
 
 
 # --- Order.anonymize --------------------------------------------------------------------------------------------

@@ -26,7 +26,7 @@ import pytest
 from django.test import RequestFactory
 
 from django_checkout.domain.payment_provider.payu_signature import is_valid_notification, parse_signature_header
-from django_checkout.enums import OrderStatus, PaymentIntentStatus
+from django_checkout.enums import OrderStatus, PaymentIntentStatus, PaymentProvider
 from django_checkout.models import Order, PaymentIntent, PaymentMethod
 from django_checkout.views.payment_provider import payu as payu_view
 from django_checkout.views.payment_provider.payu import payu_notify
@@ -263,3 +263,26 @@ def test_malformed_body_is_not_retried(payment_intent):
     response = _notify(b"not json at all", _signed(b"not json at all"))
 
     assert response.status_code == 200
+
+
+# --- What is stored (invented buyer) ----------------------------------------------------
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("provider", [PaymentProvider.PAYU, PaymentProvider.PAYU_CARD, PaymentProvider.PAYU_BLIK])
+def test_stored_notification_holds_no_buyer_data(payment_intent, payu_method, provider):
+    """The signature is checked on the raw body, buyer included; the payment keeps the allowlisted keys only."""
+    payu_method.provider = provider
+    payu_method.save()
+    buyer = {"email": "zapis.payu@example.org", "phone": "600100277", "firstName": "Notyfia", "lastName": "Payu"}
+    order = {"orderId": PAYU_ORDER_ID, "status": "COMPLETED", "totalAmount": "1000", "buyer": buyer}
+    body = json.dumps({"order": {**order, "payMethod": {"type": "BLIK_AUTHORIZATION_CODE"}}}).encode()
+
+    response = _notify(body, _signed(body))
+
+    assert response.status_code == 200
+    payment_intent.refresh_from_db()
+    assert payment_intent.payment_status == PaymentIntentStatus.COMPLETE
+    assert payment_intent.provider_notify == {
+        "order": {"orderId": PAYU_ORDER_ID, "status": "COMPLETED", "totalAmount": "1000"}
+    }

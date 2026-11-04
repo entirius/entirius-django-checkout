@@ -72,6 +72,9 @@
   nothing cancels an abandoned unpaid order by itself.
   Erase in checkout before deleting the account in django-accounts: afterwards checkout finds orders only by the
   e-mails they hold.
+- **Gateway payloads:** after the deploy run `manage.py scrub-gateway-payloads` (dry run, counts only), then
+  `manage.py scrub-gateway-payloads --apply`: payments stored before keep their whole payloads, buyer included,
+  until then. Idempotent; `--batch-size` sets the rows per batch (500).
 
 ### Fixed
 
@@ -94,6 +97,9 @@
   (the whole address, case-insensitive); carts by the account and the address e-mails. In another customer's order
   or cart the erased e-mail is replaced wherever a string holds it (gift card recipient, comment) and nothing else
   changes, under a row lock; such an order never refuses the erasure. The account e-mail matches case aside.
+- Autopay: an order paid with Autopay is created again. `process_payment` stored the request DTO itself in
+  `provider_request`, which a JSON field cannot hold, so saving the payment raised `TypeError` and the order rolled
+  back. It stores the DTO's dict (through the allowlist).
 - Log lines and BI events no longer carry a customer's personal data. The admin order preview (v2
   `GET admin/{channel}/orders/{uid}/`) logged the billing e-mail and now logs the order id; the PayU, PayPal and
   Stripe notification views logged and sent to BI the whole notification (buyer, payer, `customer_details`) and now
@@ -234,6 +240,8 @@
 
 ### Added
 
+- `scrub-gateway-payloads`: puts every stored `provider_request` / `provider_notify` through the allowlist, in
+  batches (`iterator()` + `bulk_update`). Dry run unless `--apply`; the output holds counts only.
 - Docs: `docs/api/checkout.md` (Code usage) says what an order that loses the race for a code's last use leaves
   behind. It has already opened a payment session at the gateway when it rolls back; the customer never gets the
   session, no money moves, and the gateway keeps it as an abandoned, unpaid session.
@@ -260,6 +268,14 @@
   the carts; v1 answers 409 `OPEN_ORDERS` with the blocking orders' ids, numbers and statuses (no personal data), and
   `output.admin.admin_customer_delete` raises `ErasureBlocked`. It anonymised the delivery address of an order still
   to ship. A pinned erase token looks at its channel's orders only. `complete-erasures` is not affected.
+- Gateway payloads are stored through the allowlist on every save, not only at erasure. `provider_request` and
+  `provider_notify` of a `PaymentIntent` keep ids, amounts, currencies, statuses and timestamps, for every provider
+  (PayU, PayU card, BLIK, PayPal, Stripe, Przelewy24, Paynow, Autopay and any other, vouchers included). The buyer,
+  descriptions, URLs, products, signatures and card or BLIK credentials are no longer stored, and a late or
+  redelivered notification after an erasure brings no personal data back. Signatures are still verified on the raw
+  request. Nothing in checkout, the CMS or the test package reads the dropped keys; the Django admin shows the
+  reduced payloads, and a stored Stripe session no longer keeps its `object` type. A payment stored before keeps its
+  payloads until it is saved again (a later notification, an admin edit) or the customer is erased.
 
 ## 10.0.1 — 2026-10-27
 
