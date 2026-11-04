@@ -9,6 +9,16 @@
   looked the code up by its text alone and raised `MultipleObjectsReturned`, so the customer got 403
   `INVALID_REQUEST` for an order that existed. The usage now counts on the code row the cart applied: a rule of the
   order's channel and currency (or of none), of the same kind (typed or automatic) and modifier, lowest pk on a tie.
+- v2 API (client-visible): `POST orders/` counts the discount codes it takes, as v1 does. It never did, so
+  `max_used` and `max_uses_per_user` limited nothing for v2 orders and a one-use code worked forever. v1 and v2 now
+  count through one function (`services/discount_usage.py`), in the order's transaction, with an update that takes a
+  use only while one is left: of two orders racing for the last use, one is not saved. A v2 order whose cart holds a
+  code that no longer applies (used up, the per-address limit reached, expired, ...) is refused with 409 and the
+  code's reason as `error` (`DISCOUNT_USAGE_LIMIT_REACHED`, ...) instead of being placed without the discount at a
+  total the customer never saw. v1 keeps placing such an order without the code. A v1 order that lost the last use,
+  or took an automatic rule whose code was at `max_used`, no longer answers 403 for an order that was saved; the
+  first is not saved, the second is placed and its code stops counting at the limit. The floor of
+  `entirius-django-utils` moves to 2.1.0 (the v2 handler keeps a 409's code).
 
 ## 10.0.1 — 2026-10-27
 

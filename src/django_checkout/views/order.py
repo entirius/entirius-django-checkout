@@ -7,7 +7,7 @@ import os
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
-from django.db.models import F, Prefetch, Q
+from django.db.models import Prefetch, Q
 from django.http import HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django_utils.api.decorators import (
@@ -28,12 +28,12 @@ from django_checkout.domain.validators.order import OrderValidation
 from django_checkout.enums import OrderStatus
 from django_checkout.models import (
     Cart,
-    DiscountCode,
     Order,
     OrderAttachment,
     OrderStatusLabel,
     ShippingIntent,
 )
+from django_checkout.services.discount_usage import use_discounts
 from django_checkout.settings import CHECKOUT_USE_ISO_DATETIME_FORMAT
 from django_checkout.utils import redact_payment_secrets
 from django_checkout.utils.api.decorators import channel_view
@@ -111,15 +111,16 @@ def order_view(request, *args, **kwargs):
             # Splitting order
             items_to_split, len_parts = check_that_order_can_be_split(cart, request.channel)
 
-            if not len_parts or not len_parts > 1:
-                order, redirect, payment_error = Order.create(
-                    processed_data, cart, request.channel, customer=customer, request=request
-                )
-            split_orders_pretty_id = []
-            if len_parts:
-                if len_parts > 1:
-                    # Jeżeli order może być podzielony na więcej niż jedną część, to dzieli i zapisuje w bazie
-                    with transaction.atomic():
+            # The order and its code uses commit together: an order that cannot take a code is not saved.
+            with transaction.atomic():
+                if not len_parts or not len_parts > 1:
+                    order, redirect, payment_error = Order.create(
+                        processed_data, cart, request.channel, customer=customer, request=request
+                    )
+                split_orders_pretty_id = []
+                if len_parts:
+                    if len_parts > 1:
+                        # Jeżeli order może być podzielony na więcej niż jedną część, to dzieli i zapisuje w bazie
                         split_orders_pretty_id, (order, redirect_split, payment_error) = split_orders_by_attribute(
                             processed_data,
                             request.channel,
@@ -132,15 +133,15 @@ def order_view(request, *args, **kwargs):
                         )
                         if redirect_split:
                             redirect = redirect_split
-                elif len_parts == 1:
-                    # Jeżeli order może być podzielony na jedynie jedną część,
-                    # to go nie dzieli i oznacza w zamówieniu głównym, jakim atrybutem miał być dzielony
-                    split_by_attr_idx, split_by_feature_idx = tuple(list(items_to_split)[0])
-                    cart.cart_body["split_by_attr_idx"] = str(split_by_attr_idx) if split_by_attr_idx else None
-                    cart.cart_body["split_by_feature_idx"] = str(split_by_feature_idx)
-                    cart.save()
+                    elif len_parts == 1:
+                        # Jeżeli order może być podzielony na jedynie jedną część,
+                        # to go nie dzieli i oznacza w zamówieniu głównym, jakim atrybutem miał być dzielony
+                        split_by_attr_idx, split_by_feature_idx = tuple(list(items_to_split)[0])
+                        cart.cart_body["split_by_attr_idx"] = str(split_by_attr_idx) if split_by_attr_idx else None
+                        cart.cart_body["split_by_feature_idx"] = str(split_by_feature_idx)
+                        cart.save()
 
-            use_discounts(order.order_body["cart"]["discounts"], request.channel, order=order)
+                use_discounts(order.order_body["cart"]["discounts"], request.channel, order=order)
             status_label = order.order_status
             try:
                 status_label_obj = OrderStatusLabel.objects.get(status=order.order_status, channel=request.channel)
@@ -408,69 +409,3 @@ def get_order_attachment(request, channel_idx=None, order_id=None, file_id=None,
             response["Access-Control-Expose-Headers"] = "x-filename"
             return response
     raise NotFound(message="File does't exists", status="file_doesnt_exists")
-
-
-def _applied_code(discount: dict, channel, currency: str | None) -> DiscountCode | None:
-    """The code row the cart applied ``discount`` from.
-
-    A code is not unique: one code may sit on an EUR and a PLN rule, or in another channel. The cart applied it from
-    a rule of this channel, of its currency (or of none), of the same kind (typed or automatic) and modifier; of rows
-    that still tie, the lowest pk, as ``validate_discounts`` picks.
-    """
-    rows = DiscountCode.objects.filter(
-        code=discount["code"],
-        rule__channels=channel,
-        rule__automatic_applications=bool(discount.get("is_automatic")),
-    )
-    if currency:
-        rows = rows.filter(Q(rule__currencies__isnull=True) | Q(rule__currencies__iso3=currency.upper()))
-    if discount.get("modifier"):
-        rows = rows.filter(rule__modifier=discount["modifier"])
-    return rows.order_by("pk").first()
-
-
-def use_discounts(discounts: list, channel, order=None):
-    """
-    Zwiększa licznik użyć kodów rabatowych i zapisuje użycie w tabeli UsedCoupon.
-
-    Args:
-        discounts: Lista użytych rabatów z order_body['cart']['discounts']
-        channel: Channel w którym utworzono zamówienie
-        order: Order object - potrzebny do zapisania UsedCoupon
-    """
-    from django_checkout.models import UsedCoupon
-
-    currency = order.order_body.get("currency_code") if order else None
-    for discount in discounts:
-        code = discount.get("code")
-        if not code:
-            continue
-
-        discount_code_obj = _applied_code(discount, channel, currency)
-        # None: an automatic rule without codes stands in the cart under its name and has no usage count
-        if discount_code_obj is not None:
-            discount_code_obj.current_used = F("current_used") + 1
-            discount_code_obj.save()
-
-        if order:
-            billing_email = order.billing_email
-            shipping_email = order.shipping_email
-
-            if not billing_email:
-                if order.customer and hasattr(order.customer, "user"):
-                    billing_email = order.customer.user.email
-                elif order.order_body.get("addresses", {}).get("billing_address", {}).get("email"):
-                    billing_email = order.order_body["addresses"]["billing_address"]["email"]
-
-            if not shipping_email and order.order_body.get("addresses", {}).get("shipping_address", {}).get("email"):
-                shipping_email = order.order_body["addresses"]["shipping_address"]["email"]
-
-            if billing_email or shipping_email:
-                UsedCoupon.objects.create(
-                    channel=channel,
-                    order=order,
-                    customer=order.customer,
-                    billing_email=billing_email or "",
-                    shipping_email=shipping_email or "",
-                    discount_code=code,
-                )

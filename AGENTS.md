@@ -81,6 +81,7 @@ src/django_checkout/
 │   ├── cart_service.py      # Cart CRUD + sub-resource patches
 │   ├── cart_response_builder.py  # Domain -> v2 response translation
 │   ├── order_service.py     # v2 order create/list
+│   ├── discount_usage.py    # code usage of an order (v1 + v2): counters, UsedCoupon rows
 │   ├── customer.py          # Customer anonymization
 │   └── stock_sync_service.py # QMS warehouse sync
 ├── worker/                  # Discount calculation, order splitting

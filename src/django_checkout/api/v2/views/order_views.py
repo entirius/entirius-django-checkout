@@ -9,19 +9,21 @@ import os
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.http import FileResponse
-from drf_spectacular.utils import OpenApiExample, OpenApiParameter, extend_schema
+from drf_spectacular.utils import OpenApiExample, OpenApiParameter, OpenApiResponse, extend_schema
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
+from django_checkout.api.v2.exceptions import DiscountCodeConflict
 from django_checkout.api.v2.mixins import CheckoutChannelMixin
 from django_checkout.api.v2.openapi import CHANNEL_PARAM, FILE_PARAM, ORDER_PARAM, PRETTY_ID_PARAM
 from django_checkout.api.v2.permissions import ChannelAPIKeyPermission
 from django_checkout.models import Order, OrderAttachment
 from django_checkout.schemas.responses.order import OrderCreateResponse, OrderListResponse
 from django_checkout.services import order_service
+from django_checkout.services.discount_usage import DiscountCodeRefused
 from django_checkout.utils import redact_payment_secrets
 
 logger = logging.getLogger("checkout.v2.orders")
@@ -36,7 +38,16 @@ class OrderCreateView(CheckoutChannelMixin, APIView):
         summary="Create order",
         description="Finalize cart into order. Validates everything, reserves stock, initiates payment.",
         tags=["Checkout Orders"],
-        responses={201: OrderCreateResponse},
+        responses={
+            201: OrderCreateResponse,
+            409: OpenApiResponse(
+                description=(
+                    "A discount code the cart applied can no longer be used; nothing is ordered. `error` is the "
+                    "reason, as in the cart's `_errors`: `DISCOUNT_USAGE_LIMIT_REACHED`, "
+                    "`DISCOUNT_PER_USER_LIMIT_REACHED`, `DISCOUNT_EXPIRED` or another `DISCOUNT_*` code."
+                )
+            ),
+        },
     )
     def post(self, request, **kwargs):
         channel = self.get_channel()
@@ -55,6 +66,8 @@ class OrderCreateView(CheckoutChannelMixin, APIView):
             )
         except ObjectDoesNotExist:
             return Response({"error": "NOT_FOUND", "message": "Cart does not exist."}, status=404)
+        except DiscountCodeRefused as exc:
+            raise DiscountCodeConflict.refusing(exc.code, exc.reason) from exc
 
         response = OrderCreateResponse(
             order_id=str(result.order.order_id) if result.order else "",
