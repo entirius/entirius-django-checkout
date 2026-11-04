@@ -5,6 +5,8 @@
 """Przelewy24 notifications: which ones may change a payment, and how far.
 
 A notification reaches only a Przelewy24 payment, and is verified with that payment's own method.
+Its ``sign`` (SHA-384 over the documented fields and the CRC key) must match before Przelewy24 is
+asked to verify the transaction.
 
 Przelewy24 is never called: the provider's ``verify_transaction_payment`` is replaced, and any
 other outbound HTTP fails the test.
@@ -172,6 +174,84 @@ def test_verification_uses_the_payments_own_method(channel, customer, verificati
     payment_intent = _intent(channel, customer, order=order)
 
     response = _notify()
+
+    assert response.status_code == 200
+    assert len(verifications) == 1
+    assert _state(payment_intent) == (PaymentIntentStatus.COMPLETE, OrderStatus.CONFIRMED)
+
+
+# --- The sign -----------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "notify_kwargs",
+    [{"sign_with": "synthetic-other-key"}, {"sign_with": None}, {"sign": "0" * 96}, {"sign": 7}],
+    ids=["wrong-key", "no-sign", "made-up-sign", "not-a-string"],
+)
+def test_unsigned_or_wrongly_signed_notification_is_rejected_before_asking_przelewy24(
+    channel, customer, verifications, notify_kwargs
+):
+    payment_intent = _intent(channel, customer)
+
+    response = _notify(**notify_kwargs)
+
+    assert response.status_code == 403
+    assert verifications == []
+    assert _state(payment_intent) == UNTOUCHED
+
+
+@pytest.mark.django_db
+def test_amount_changed_after_signing_is_rejected(channel, customer, verifications):
+    payment_intent = _intent(channel, customer)
+    signed = {
+        "merchantId": 1,
+        "posId": 1,
+        "sessionId": SESSION_ID,
+        "amount": 1000,
+        "originAmount": 1000,
+        "currency": "PLN",
+        "orderId": 123456,
+        "methodId": 1,
+        "statement": "p24-SYNTHETIC",
+    }
+
+    response = _notify(sign=_sign(signed), amount=1)
+
+    assert response.status_code == 403
+    assert verifications == []
+    assert _state(payment_intent) == UNTOUCHED
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("crc_key", ["", None])
+def test_method_without_a_crc_key_rejects_instead_of_trusting(channel, customer, verifications, crc_key):
+    payment_intent = _intent(channel, customer, crc_key=crc_key)
+
+    response = _notify(sign_with="")
+
+    assert response.status_code == 403
+    assert verifications == []
+    assert _state(payment_intent) == UNTOUCHED
+
+
+@pytest.mark.django_db
+def test_body_missing_a_signed_field_is_rejected(channel, customer, verifications):
+    payment_intent = _intent(channel, customer)
+
+    response = _notify(sign="0" * 96, methodId=None)
+
+    assert response.status_code == 403
+    assert verifications == []
+    assert _state(payment_intent) == UNTOUCHED
+
+
+@pytest.mark.django_db
+def test_statement_with_spaces_and_diacritics_is_signed_as_written(channel, customer, verifications):
+    """The SDK's own sign helpers strip spaces; Przelewy24 signs the statement as it sends it."""
+    payment_intent = _intent(channel, customer)
+
+    response = _notify(statement="Zamówienie nr 1 - łódź")
 
     assert response.status_code == 200
     assert len(verifications) == 1

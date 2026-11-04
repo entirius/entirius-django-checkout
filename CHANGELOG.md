@@ -23,9 +23,14 @@
   payment is answered 403 before Przelewy24 is asked, and a body needs both `orderId` and `sessionId`. The verify
   call uses the payment's own method, not the first method listed on the order (with a voucher listed first it
   failed).
+- Przelewy24: a notification is verified by its `sign` (SHA-384 over the documented fields and the method's CRC key)
+  before Przelewy24's verify API is asked; a missing CRC key or sign is answered 403. The CRC key comes from the
+  method's `crc_key`, else the `PRZELEWY24_CRC_KEY` setting, for the sign and the verify call alike.
 
 ### Upgrade notes
 
+- **Przelewy24:** notifications are refused (403) for a Przelewy24 method without a CRC key: set `crc_key` in its
+  `additional_data` or the `PRZELEWY24_CRC_KEY` setting. Registering transactions already needed it for their sign.
 - **PayPal:** every PayPal payment method needs `webhook_id` (PayPal developer dashboard: the REST app, Webhooks,
   Webhook ID of the webhook pointing at `notify/paypal/`) in its `additional_data`. Without it webhook notifications
   are refused (PayPal retries them for about 3 days) and an order is confirmed only when the buyer returns to the

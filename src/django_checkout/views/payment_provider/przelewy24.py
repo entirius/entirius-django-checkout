@@ -11,6 +11,7 @@ from django_utils.api.responses import Response
 from process_logger import ProcessLogger
 
 from django_checkout.bi import Checkout_Przelewy24NotifyEvent
+from django_checkout.domain.payment_provider.przelewy24_notification import crc_key_for, is_valid_notification
 from django_checkout.enums import OrderStatus, PaymentIntentStatus, PaymentProvider
 from django_checkout.models import Order, PaymentIntent
 
@@ -65,6 +66,15 @@ def przelewy24_notify(request: WSGIRequest, *args, **kwargs):
         logger_process.error("PaymentIntent is not a Przelewy24 payment, notification ignored")
         bev.finish_with_error(finish_tag="Przelewy24 notification rejected", details=extra)
         return Response(data={"message": "Notification rejected"}, status="FAIL", status_code=403)
+
+    # Authenticity check before Przelewy24 is asked: until it passes every field is caller-controlled.
+    if not is_valid_notification(body, crc_key_for(method)):
+        extra = {"przelewy24_order_id": przelewy24_order_id, "payment_intent_pk": payment_intent.pk}
+        logger_process.add_log_param_once("przelewy24_order_id", przelewy24_order_id)
+        logger_process.add_log_param_once("payment_intent_pk", payment_intent.pk)
+        logger_process.error("Przelewy24 notification sign is invalid or cannot be verified (crc_key missing)")
+        bev.finish_with_error(finish_tag="Przelewy24 notification sign verification failed", details=extra)
+        return Response(data={"message": "Invalid signature"}, status="FAIL", status_code=403)
 
     payment_intent.provider_notify = body
     extra = {
