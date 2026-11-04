@@ -96,7 +96,7 @@
   orders are found by the account, the e-mail columns, the billing and shipping address e-mails and the used codes
   (the whole address, case-insensitive); carts by the account and the address e-mails. In another customer's order
   or cart the erased e-mail is replaced wherever a string holds it (gift card recipient, comment) and nothing else
-  changes; such an order still to fulfil refuses the erasure.
+  changes, under a row lock; such an order never refuses the erasure. The account e-mail matches case aside.
 - Autopay: an order paid with Autopay is created again. `process_payment` stored the request DTO itself in
   `provider_request`, which a JSON field cannot hold, so saving the payment raised `TypeError` and the order rolled
   back. It stores the DTO's dict (through the allowlist).

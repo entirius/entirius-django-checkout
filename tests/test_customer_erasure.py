@@ -673,18 +673,52 @@ def test_another_customers_order_keeps_everything_but_the_erased_email(channel):
 
 
 @pytest.mark.django_db
-def test_another_customers_open_order_holding_the_email_refuses_the_erasure(channel):
-    """The shop may still have to deliver A's gift card to B's address."""
+def test_another_customers_open_order_does_not_refuse_the_erasure(channel):
+    """Only the customer's own orders refuse it: nobody should cancel A's order to erase B."""
     order = Order.objects.create(
         channel=channel, order_body=_gift_for(EMAIL), billing_email=OTHER_EMAIL, order_status=OrderStatus.CONFIRMED
     )
 
-    with pytest.raises(ErasureBlocked) as refused:
-        _erase(EMAIL)
+    success, orders_idxs, *_ = _erase(EMAIL)
 
-    assert [blocking.order_id for blocking in refused.value.orders] == [str(order.order_id)]
+    assert (success, orders_idxs) == (True, [str(order.order_id)])
     order.refresh_from_db()
-    assert order.order_body == _gift_for(EMAIL)
+    assert order.order_body["cart"]["items"][0]["voucher_gift"]["recipient_email"] == ANONYMIZED_EMAIL
+    assert order.order_body["addresses"] == _body(OTHER_EMAIL)["addresses"]
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("text", "kept"),
+    [
+        (f"send to '{EMAIL}'", f"send to '{ANONYMIZED_EMAIL}'"),
+        (f"https://shop.example.com/r?email={EMAIL}&x=1", f"https://shop.example.com/r?email={ANONYMIZED_EMAIL}&x=1"),
+        (f"ref: jo{EMAIL}", f"ref: jo{EMAIL}"),
+    ],
+    ids=["quoted", "query-string", "longer-address"],
+)
+def test_the_email_is_replaced_where_a_word_or_url_ends_it(channel, text, kept):
+    body = _body(OTHER_EMAIL)
+    body["comment"] = text
+    order = Order.objects.create(channel=channel, order_body=body, order_status=OrderStatus.COMPLETED)
+
+    _erase(EMAIL)
+
+    order.refresh_from_db()
+    assert order.order_body["comment"] == kept
+
+
+@pytest.mark.django_db
+def test_the_account_email_matches_case_aside(channel, customer):
+    customer.user.email = EMAIL.upper()
+    customer.user.save()
+    cart = Cart.objects.create(channel=channel, customer=customer, cart_body={"comment": COMMENT})
+
+    _, _, carts_idxs, *_ = _erase(EMAIL)
+
+    assert carts_idxs == [str(cart.cart_id)]
+    cart.refresh_from_db()
+    assert cart.cart_body["comment"] == "x" * len(COMMENT)
 
 
 # --- Orders the shop still has to fulfil refuse the erasure ------------------------------------------------------

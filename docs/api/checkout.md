@@ -2033,7 +2033,8 @@ address e-mails in `cart_body`. Every match is the whole address, case aside: er
 Another customer's order or cart that holds the e-mail in some other field keeps everything but that e-mail: in
 every string of the body (a gift card's `recipient_email` in `cart.items[].voucher_gift`, the `comment`, any other
 field) the address becomes the marker, and the rest of the text, the names, the addresses, the e-mail columns and
-the payments stay. The response lists such an order or cart with the others.
+the payments stay. The response lists such an order or cart with the others. It never refuses the erasure, even
+while the shop still has to fulfil it: a gift card bought for the erased person then has no address to go to.
 
 | Where | Anonymised | Kept |
 |---|---|---|
@@ -2051,9 +2052,8 @@ Names and free text become `x` of the same length, e-mails `x…x@example.com`. 
 #### Orders not fulfilled yet refuse it
 
 While the customer has an order the shop still has to fulfil, the erasure is refused and nothing is anonymised:
-not that order, not the customer's other orders, not the carts. The same goes for another customer's order still to
-fulfil that holds the e-mail (the shop may still have to deliver a gift card to it). A pinned token looks at its
-channel's orders only.
+not that order, not the customer's other orders, not the carts. Another customer's order that only holds the
+e-mail never refuses it. A pinned token looks at its channel's orders only.
 
 | Status | Refuses the erasure | Why |
 |---|---|---|

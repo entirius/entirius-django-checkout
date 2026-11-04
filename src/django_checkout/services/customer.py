@@ -4,6 +4,7 @@
 
 from dataclasses import dataclass, field
 
+from django.db import transaction
 from django.db.models import Q, QuerySet
 from process_logger import ProcessLoggerMixin
 
@@ -76,7 +77,7 @@ def _orders_of(email: str) -> QuerySet:
     """
     used_codes = UsedCoupon.objects.filter(Q(billing_email__iexact=email) | Q(shipping_email__iexact=email))
     return Order.objects.filter(
-        Q(customer__user__email=email)
+        Q(customer__user__email__iexact=email)
         | Q(billing_email__iexact=email)
         | Q(shipping_email__iexact=email)
         | Q(pk__in=used_codes.values("order_id"))
@@ -85,13 +86,17 @@ def _orders_of(email: str) -> QuerySet:
 
 
 def _carts_of(email: str) -> QuerySet:
-    return Cart.objects.filter(Q(customer__user__email=email) | _address_email("cart_body", email))
+    return Cart.objects.filter(Q(customer__user__email__iexact=email) | _address_email("cart_body", email))
 
 
-def _rewritten_mentions(rows: QuerySet, body_field: str, email: str) -> list:
-    """Other customers' rows whose body holds ``email`` elsewhere, with it replaced in memory (nothing saved)."""
-    candidates = rows.filter(**{f"{body_field}__icontains": email})
-    return [row for row in candidates if anonymize_email_in_body(getattr(row, body_field), email)]
+def _replace_mention(model: type[Order] | type[Cart], pk: int, body_field: str, email: str) -> str | None:
+    """Replace ``email`` in a fresh, locked body of another customer's row; its id, or None when it held none."""
+    with transaction.atomic():
+        row = model.objects.select_for_update().get(pk=pk)
+        if not anonymize_email_in_body(getattr(row, body_field), email):
+            return None
+        model.objects.filter(pk=pk).update(**{body_field: getattr(row, body_field)})
+    return str(row.order_id if model is Order else row.cart_id)
 
 
 class CustomerService(ProcessLoggerMixin):
@@ -101,48 +106,44 @@ class CustomerService(ProcessLoggerMixin):
         """Anonymise the orders and carts of ``email``: in ``channel`` only, or in every channel when None.
 
         Another customer's order or cart that holds the e-mail in some other field keeps everything but that e-mail.
-        Raises ``ErasureBlocked`` before anything is written while one of the orders it would change is not settled.
+        Raises ``ErasureBlocked`` before anything is written while one of the customer's orders is not settled.
         """
-        orders = list(
-            _in_channel(_orders_of(email), channel)
-            .select_related("cart")
-            .prefetch_related("used_coupons", "payment_items")
-        )
-        others = _in_channel(Order.objects.exclude(pk__in=[order.pk for order in orders]), channel)
-        mentioning = _rewritten_mentions(others, "order_body", email)
-        _refuse_unsettled(orders + mentioning)
+        own = _in_channel(_orders_of(email), channel)
+        orders = list(own.select_related("cart").prefetch_related("used_coupons", "payment_items"))
+        _refuse_unsettled(orders)
         erasure = _Erasure()
         for order in orders:
             if self._anonymize_order(order, erasure) and order.cart is not None:
                 self._anonymize_cart(order.cart, erasure)
-        for order in mentioning:
-            self._save_mention(order, erasure)
+        others = _in_channel(Order.objects.exclude(pk__in=own.values("pk")), channel)
+        self._replace_mentions(others, "order_body", email, erasure)
         self._erase_carts(email, channel, erasure)
         self._notify(email, erasure, channel)
         return erasure.result()
 
     def _erase_carts(self, email: str, channel: Channel | None, erasure: _Erasure) -> None:
-        carts = list(_in_channel(_carts_of(email), channel))
-        for cart in carts:
+        own = _in_channel(_carts_of(email), channel)
+        for cart in own:
             self._anonymize_cart(cart, erasure)
-        others = _in_channel(Cart.objects.exclude(pk__in=[cart.pk for cart in carts]), channel)
-        for cart in _rewritten_mentions(others, "cart_body", email):
-            self._save_mention(cart, erasure)
+        others = _in_channel(Cart.objects.exclude(pk__in=own.values("pk")), channel)
+        self._replace_mentions(others, "cart_body", email, erasure)
 
-    def _save_mention(self, row: Order | Cart, erasure: _Erasure) -> None:
-        """Store another customer's body in which only the erased e-mail changed."""
-        if isinstance(row, Order):
-            body_field, row_id, done, failed = "order_body", str(row.order_id), erasure.orders_idxs, erasure.orders_fail
-        else:
-            body_field, row_id, done, failed = "cart_body", str(row.cart_id), erasure.carts_idxs, erasure.carts_fail
-        try:
-            type(row).objects.filter(pk=row.pk).update(**{body_field: getattr(row, body_field)})
-        except Exception as e:
-            self.logger.exception(e)
-            failed.append(row_id)
-            erasure.success = False
-            return
-        done.append(row_id)
+    def _replace_mentions(self, rows: QuerySet, body_field: str, email: str, erasure: _Erasure) -> None:
+        """Other customers' rows that hold the e-mail elsewhere: only that e-mail changes."""
+        is_order = body_field == "order_body"
+        done, failed = (
+            (erasure.orders_idxs, erasure.orders_fail) if is_order else (erasure.carts_idxs, erasure.carts_fail)
+        )
+        for pk in rows.filter(**{f"{body_field}__icontains": email}).values_list("pk", flat=True):
+            try:
+                row_id = _replace_mention(rows.model, pk, body_field, email)
+            except Exception as e:
+                self.logger.exception(e)
+                failed.append(str(pk))
+                erasure.success = False
+                continue
+            if row_id is not None:
+                done.append(row_id)
 
     def _anonymize_order(self, order: Order, erasure: _Erasure) -> bool:
         """False when anonymising the order failed (its cart is then left alone)."""

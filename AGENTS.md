@@ -155,7 +155,7 @@ toggles and defaults: `docs/configuration.md`.
   the account in `django_accounts`; the other way round orders are found only by the e-mails they hold. The
   customer's rows are found by fixed fields (account, e-mail columns, address e-mails, used codes), never by a body
   search: another customer's row that holds the e-mail elsewhere only gets that e-mail replaced
-  (`utils.anonymize_email_in_body`).
+  (`utils.anonymize_email_in_body`, on a locked fresh row), and it never refuses the erasure.
 - Gateway payloads (`PaymentIntent.provider_request` / `provider_notify`) are stored through the allowlist in
   `utils/gateway_payload.py` on every `save()`; erasure scrubs rows stored before. A key a reader needs goes into
   `_KEPT_KEYS` with its reason and a test; anything else is dropped. Verify a signature on the raw request, never on
