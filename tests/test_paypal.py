@@ -580,3 +580,57 @@ def test_bi_finish_tags_keep_their_wording(paypal_intent, monkeypatch, body, fin
     _notify(body, TRANSMISSION)
 
     assert tags == [finish_tag]
+
+
+# --- What is stored (invented payer) ----------------------------------------------------
+
+PAYER = {
+    "email_address": "zapis.paypal@example.org",
+    "payer_id": "PAYER-SYNTHETIC-9",
+    "name": {"given_name": "Notyfia", "surname": "Paypal"},
+}
+SHIPPING = {"name": {"full_name": "Notyfia Paypal"}, "address": {"address_line_1": "ul. Webhookowa 1"}}
+PAYER_VALUES = ("zapis.paypal@example.org", "PAYER-SYNTHETIC-9", "Notyfia", "Paypal", "Webhookowa")
+
+
+def _with_payer(status: str) -> dict:
+    return {
+        "id": PAYPAL_ORDER_ID,
+        "status": status,
+        "payer": PAYER,
+        "purchase_units": [{"amount": {"currency_code": "EUR", "value": "10.00"}, "shipping": SHIPPING}],
+    }
+
+
+@pytest.mark.django_db
+def test_stored_order_of_the_cancel_return_holds_no_payer_data(paypal_intent, paypal, monkeypatch):
+    from paypal_sdk.services.client import PayPal
+
+    monkeypatch.setattr(PayPal, "get_order", lambda self, order_id: (_with_payer("VOIDED"), "VOIDED"))
+
+    response = _cancel_return()
+
+    assert response.status_code == 200
+    paypal_intent.refresh_from_db()
+    assert paypal_intent.payment_status == PaymentIntentStatus.CANCELLED
+    stored = json.dumps(paypal_intent.provider_notify)
+    assert [value for value in PAYER_VALUES if value in stored] == []
+    assert paypal_intent.provider_notify["purchase_units"][0]["amount"] == {"currency_code": "EUR", "value": "10.00"}
+
+
+@pytest.mark.django_db
+def test_stored_capture_of_the_return_holds_no_payer_data(paypal_intent, paypal, monkeypatch):
+    from paypal_sdk.services.client import PayPal
+
+    monkeypatch.setattr(
+        PayPal, "get_capture_payment_for_order", lambda self, order_id: (_with_payer("COMPLETED"), "COMPLETED")
+    )
+
+    response = _buyer_return()
+
+    assert response.status_code == 200
+    paypal_intent.refresh_from_db()
+    assert paypal_intent.payment_status == PaymentIntentStatus.COMPLETE
+    stored = json.dumps(paypal_intent.provider_notify)
+    assert [value for value in PAYER_VALUES if value in stored] == []
+    assert paypal_intent.provider_notify["id"] == PAYPAL_ORDER_ID

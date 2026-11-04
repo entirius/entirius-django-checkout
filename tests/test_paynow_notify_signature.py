@@ -97,3 +97,22 @@ def test_notification_cannot_touch_another_gateways_payment(channel, customer):
 
     assert response.status_code == 404
     assert _state(payment_intent) == UNTOUCHED
+
+
+# --- What is stored ---------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_stored_notification_keeps_ids_and_status_only(channel, customer):
+    """Paynow sends no buyer data in a notification; what it sends is kept, and verified on the raw body first."""
+    payment_intent = _intent(channel, customer)
+
+    response = _notify()
+
+    assert response.status_code == 200
+    payment_intent.refresh_from_db()
+    assert payment_intent.provider_notify == {
+        "paymentId": PAYNOW_PAYMENT_ID,
+        "externalId": "SYNTHETIC-EXTERNAL",
+        "status": "CONFIRMED",
+    }

@@ -2,13 +2,15 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-"""What an erased customer's payment keeps of the gateway payloads.
+"""What checkout keeps of the gateway payloads, and what a log line may carry of them.
 
 ``PaymentIntent.provider_request`` (what checkout sent) and ``provider_notify`` (what the gateway answered) carry
 the buyer: name, e-mail, phone, address, IP, the PayPal payer id, Stripe's ``customer_details``. Every gateway
-names those keys differently and adds new ones over time, so erasure keeps an allowlist instead of hunting for
-them: transaction and order ids, amounts, currencies, statuses and timestamps — what reconciling a payout with an
-order needs. Everything else goes, and a container left empty goes with it.
+names those keys differently and adds new ones over time, so ``PaymentIntent.save()`` stores them through an
+allowlist instead of hunting for them: transaction and order ids, amounts, currencies, statuses and timestamps —
+what reconciling a payout with an order needs. Everything else goes, and a container left empty goes with it.
+Erasure runs the same scrub over payloads stored before. A key some reader needs goes into ``_KEPT_KEYS`` with its
+reason; signatures are verified on the raw request, never on a stored copy.
 
 Keys compare lower-cased without underscores, so ``orderId``, ``order_id`` and ``OrderID`` are one key.
 """

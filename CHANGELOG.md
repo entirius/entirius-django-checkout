@@ -82,6 +82,9 @@
 - Customer erasure no longer anonymises another customer whose e-mail contains the erased one: `order_body` and
   `cart_body` were searched for the e-mail as a substring, so erasing `anna@example.org` also anonymised the orders
   and carts of `joanna@example.org`. The bodies now match the whole address (case-insensitive), as the columns do.
+- Autopay: an order paid with Autopay is created again. `process_payment` stored the request DTO itself in
+  `provider_request`, which a JSON field cannot hold, so saving the payment raised `TypeError` and the order rolled
+  back. It stores the DTO's dict (through the allowlist).
 - Log lines and BI events no longer carry a customer's personal data. The admin order preview (v2
   `GET admin/{channel}/orders/{uid}/`) logged the billing e-mail and now logs the order id; the PayU, PayPal and
   Stripe notification views logged and sent to BI the whole notification (buyer, payer, `customer_details`) and now
@@ -217,6 +220,14 @@
   the carts; v1 answers 409 `OPEN_ORDERS` with the blocking orders' ids, numbers and statuses (no personal data), and
   `output.admin.admin_customer_delete` raises `ErasureBlocked`. It anonymised the delivery address of an order still
   to ship. A pinned erase token looks at its channel's orders only. `complete-erasures` is not affected.
+- Gateway payloads are stored through the allowlist on every save, not only at erasure. `provider_request` and
+  `provider_notify` of a `PaymentIntent` keep ids, amounts, currencies, statuses and timestamps, for every provider
+  (PayU, PayU card, BLIK, PayPal, Stripe, Przelewy24, Paynow, Autopay and any other, vouchers included). The buyer,
+  descriptions, URLs, products, signatures and card or BLIK credentials are no longer stored, and a late or
+  redelivered notification after an erasure brings no personal data back. Signatures are still verified on the raw
+  request. Nothing in checkout, the CMS or the test package reads the dropped keys; the Django admin shows the
+  reduced payloads, and a stored Stripe session no longer keeps its `object` type. A payment stored before keeps its
+  payloads until it is saved again (a later notification, an admin edit) or the customer is erased.
 
 ## 10.0.1 — 2026-10-27
 

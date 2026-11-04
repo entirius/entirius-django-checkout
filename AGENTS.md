@@ -147,12 +147,16 @@ toggles and defaults: `docs/configuration.md`.
   while they await payment. BI finish tags are grouped on in reports: keep their wording (`describe`).
 - Erasure (`services/customer.py` → `Order.anonymize` / `Cart.anonymize`, table in `docs/api/checkout.md`) covers
   every personal field checkout stores. A new one goes into the scrub with it: body fields in `utils` (`_PII_FIELDS`,
-  `_BODY_PII_FIELDS`), columns and related rows in `Order.anonymize`. Gateway payloads keep an allowlist
-  (`utils/gateway_payload.py`): a key accounting needs is added there, anything else is dropped on erasure.
+  `_BODY_PII_FIELDS`), columns and related rows in `Order.anonymize`.
   `CustomerService.anonymize_customer` refuses (`ErasureBlocked`, v1 409 `OPEN_ORDERS`) before writing anything while
   one of the orders is outside `SETTLED_ORDER_STATUSES`: the check lives in the service so every entry point gets it.
   `complete-erasures` calls `anonymize()` itself and is never refused. Integrators erase in checkout before deleting
   the account in `django_accounts`; the other way round orders are found only by the e-mails they hold.
+- Gateway payloads (`PaymentIntent.provider_request` / `provider_notify`) are stored through the allowlist in
+  `utils/gateway_payload.py` on every `save()`; erasure scrubs rows stored before. A key a reader needs goes into
+  `_KEPT_KEYS` with its reason and a test; anything else is dropped. Verify a signature on the raw request, never on
+  the stored copy, and log a payload that can hold the buyer only through `scrub_gateway_payload`. A queryset
+  `.update()`, `bulk_create` or `loaddata` of these fields bypasses the scrub: do not write them that way.
 - A discount code is unique per (channel, currency), a rule without currencies covering every currency
   (`services/code_clashes.py`, `docs/api/discounts.md`). Every write path (v2 admin service, Django admin forms,
   `import-discount-rules`) calls `refuse_clash` / `refuse_scope_change`; a new one must too. No DB constraint

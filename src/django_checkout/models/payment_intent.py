@@ -14,6 +14,9 @@ if TYPE_CHECKING:
     from django_checkout.models.payment_method import PaymentMethod
 
 
+_PAYLOAD_FIELDS = ("provider_request", "provider_notify")
+
+
 class PaymentIntent(models.Model):
     order: "Order" = models.ForeignKey("Order", related_name="payment_items", on_delete=models.CASCADE)
     method: "PaymentMethod" = models.ForeignKey("PaymentMethod", null=True, blank=True, on_delete=models.SET_NULL)
@@ -36,16 +39,23 @@ class PaymentIntent(models.Model):
         # — one PaymentIntent per provider per order, but multiple providers OK.
         constraints = [models.UniqueConstraint(fields=["order", "code"], name="one_intent_per_order_code")]
 
+    def save(self, *args, **kwargs) -> None:
+        # Data minimisation: a payload is stored only through the allowlist (ids, amounts, currencies, statuses,
+        # timestamps), whoever writes it. Providers verify signatures on the raw request, never on these copies.
+        update_fields = kwargs.get("update_fields")
+        for name in _PAYLOAD_FIELDS:
+            if update_fields is None or name in update_fields:
+                setattr(self, name, scrub_gateway_payload(getattr(self, name)))
+        super().save(*args, **kwargs)
+
     def anonymize(self) -> bool:
-        """Keep only ids, amounts, statuses and timestamps of the gateway payloads; True if there were any.
+        """Reduce payloads stored before ``save()`` scrubbed them; True if one held something the allowlist drops.
 
         The columns (amount, currency, external_order_id, payment_status, code) stay: accounting needs them.
         """
-        if self.provider_request is None and self.provider_notify is None:
+        if all(scrub_gateway_payload(getattr(self, name)) == getattr(self, name) for name in _PAYLOAD_FIELDS):
             return False
-        self.provider_request = scrub_gateway_payload(self.provider_request)
-        self.provider_notify = scrub_gateway_payload(self.provider_notify)
-        self.save(update_fields=["provider_request", "provider_notify"])
+        self.save(update_fields=list(_PAYLOAD_FIELDS))  # save() scrubs them
         return True
 
 

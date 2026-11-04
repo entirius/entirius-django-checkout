@@ -106,11 +106,7 @@ def test_expired_session_cancels_the_payment_and_stores_the_session(channel, cus
 
     assert response.status_code == 200
     assert _state(payment_intent) == (PaymentIntentStatus.CANCELLED, OrderStatus.CANCELED)
-    assert payment_intent.provider_notify == {
-        "id": SESSION_ID,
-        "object": "checkout.session",
-        "payment_status": "unpaid",
-    }
+    assert payment_intent.provider_notify == {"id": SESSION_ID, "payment_status": "unpaid"}  # through the allowlist
 
 
 # --- The endpoint secret -----------------------------------------------------------------
@@ -302,3 +298,26 @@ def test_bi_finish_tags_keep_their_wording(
     _notify(channel, event_type, payment_status)
 
     assert tags == [finish_tag]
+
+
+# --- What is stored (invented customer) -------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_stored_session_holds_no_customer_details(channel, customer, stripe_method):
+    payment_intent = _intent(channel, customer, stripe_method)
+    details = {"email": "zapis.stripe@example.org", "name": "Notyfia Stripe", "phone": "600100266"}
+    session = {
+        "id": SESSION_ID,
+        "object": "checkout.session",
+        "payment_status": "paid",
+        "amount_total": 1000,
+        "customer_details": details,
+    }
+    payload = json.dumps({"id": "EVT-9", "object": "event", "type": COMPLETED, "data": {"object": session}})
+
+    response = stripe_views.stripe_notify(_signed_request(payload), channel_idx=channel.idx)
+
+    assert response.status_code == 200  # construct_event verified the raw body, customer_details included
+    assert _state(payment_intent) == (PaymentIntentStatus.COMPLETE, OrderStatus.CONFIRMED)
+    assert payment_intent.provider_notify == {"id": SESSION_ID, "payment_status": "paid", "amount_total": 1000}

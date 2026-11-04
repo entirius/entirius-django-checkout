@@ -1991,6 +1991,19 @@ rolls back. The customer never gets that session's redirect URL, so no money mov
 abandoned, unpaid session. Nothing of it is left in the shop: the order and its payment intent roll back together,
 and a notification the gateway may still send for that session finds no payment and is logged as an unknown one.
 
+### Stored gateway payloads
+
+`PaymentIntent.provider_request` (what checkout sent to the gateway) and `provider_notify` (what the gateway
+answered or notified) are stored through an allowlist (`utils/gateway_payload.py`), for every provider and on
+every save: transaction and order ids, amounts, currencies, statuses and timestamps. The buyer (name, e-mail,
+phone, address, IP, PayPal payer and payer id, Stripe `customer_details`), descriptions, URLs, product lists,
+signatures and payment credentials are never stored. Signatures are verified on the raw request before anything
+is stored, and a notification that arrives after an erasure is stored the same way, so it brings no personal data
+back. The PayU, PayPal, Stripe and Autopay notification views log and send to BI a payload only through the same
+scrub; Paynow and Przelewy24 notifications carry no buyer data. A payment stored before this release keeps its
+whole payloads until it is saved again (a later notification, an edit in the Django admin) or the customer is
+erased; nothing backfills them.
+
 ### Customer erasure
 
 `DELETE /api-admin/checkout/1/{channel}/customer/delete` with `{"email": "<address>"}` (admin key, scope
@@ -2006,7 +2019,7 @@ order an earlier one left half done. Every match is the whole address, case asid
 | `order_body` / `cart_body` | `comment`, `customer_ip`, gift-card personalisation, payment credentials (`***REDACTED***`, masked voucher codes stay) | totals, items, codes, shipping method and pickup point, `affiliate_code` |
 | `Order` | `billing_email`, `shipping_email` | status, numbers, `customer` (the account erasure in `django_accounts` sets it to NULL) |
 | `UsedCoupon` | `billing_email`, `shipping_email` | the code and the order (`max_uses_per_user` no longer ties the use to the erased e-mail) |
-| `PaymentIntent` | `provider_request`, `provider_notify`: everything except ids, amounts, currencies, statuses and timestamps | `amount`, `currency`, `external_order_id`, `payment_status`, `code`, `redirect_url` |
+| `PaymentIntent` | `provider_request`, `provider_notify` stored before payloads went through the allowlist: everything except ids, amounts, currencies, statuses and timestamps | `amount`, `currency`, `external_order_id`, `payment_status`, `code`, `redirect_url` |
 | `PaymentRedirect` | `target_url` (`***REDACTED***`: a copy of the body's `continue_url`) | token, expiry, consumption time |
 
 Names and free text become `x` of the same length, e-mails `x…x@example.com`. Not touched: invoices
