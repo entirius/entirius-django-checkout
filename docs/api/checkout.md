@@ -1961,7 +1961,7 @@ detail per rejected code. `field` is `codes[i].code`, `i` being the code's place
 | `DISCOUNT_MIN_ORDER_NOT_MET` | cart total below the rule's `min_order_amount` | `min_order_amount` |
 | `DISCOUNT_LOGIN_REQUIRED` | first-order-for-logged-in rule, guest cart | — |
 | `DISCOUNT_FIRST_ORDER_ONLY` | first-order rule, the email has orders | — |
-| `DISCOUNT_CURRENCY_NOT_SUPPORTED` | the rule has no value for the cart currency | `currency` |
+| `DISCOUNT_CURRENCY_NOT_SUPPORTED` | the rule has no value for the cart currency, or its `currencies` leave the cart currency out | `currency` |
 | `DISCOUNT_DUPLICATE_RULE` | another code of the same rule (or the same code) is already in the cart | — |
 | `DISCOUNT_BLOCKED_BY_EXCLUSIVE_RULE` | a higher-priority rule won arbitration (it or this code is exclusive) | `blocking_code`, only when the client already sees it: a code it sent or a discount applied in this cart |
 | `DISCOUNT_BLOCKED_BY_PRICE_RULES` | the price list allows no discount codes | — |

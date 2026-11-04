@@ -2,14 +2,20 @@
 
 ## Unreleased
 
+### Fixed
+
+- A discount rule limited to some currencies (`currencies`) applies only to carts in one of them; a rule with none
+  applies in every currency, as before. Only the gratis offer list read the field, so a PLN-only automatic rule
+  discounted an EUR cart, a PLN-only rule could win priority arbitration on an EUR cart and block its codes, and a
+  code on an EUR and a PLN rule (`GRATIS_STEP` in the test package) took the PLN rule on an EUR cart and offered no
+  gift. A code whose rules all leave out the cart currency is rejected as `currency_not_supported` (v2
+  `DISCOUNT_CURRENCY_NOT_SUPPORTED`, meta `currency`); v1 lists it under `one_or_more_discount_invalid`.
 ### Added
 
 - `django_checkout.output.quantities.get_bundle_quantities(skus, channel_idx)`: how many of each bundle its
   components allow, as the cart counts a bundle line (the bundle's own Stock row does not decide; with limits, the
   required and default components). For other modules that answer stock, so a bundle they report available is one
   the cart accepts. SKUs that are not bundles are left out.
-
-### Fixed
 
 - A bundle counts all of its components when several bundles are checked at once. The links were grouped by
   adjacent rows of an unordered query, so a bundle whose links came apart kept only the last group of them.
