@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from django_checkout.models.payment_method import PaymentMethod
 
 
-_PAYLOAD_FIELDS = ("provider_request", "provider_notify")
+PAYLOAD_FIELDS = ("provider_request", "provider_notify")
 
 
 class PaymentIntent(models.Model):
@@ -43,7 +43,7 @@ class PaymentIntent(models.Model):
         # Data minimisation: a payload is stored only through the allowlist (ids, amounts, currencies, statuses,
         # timestamps), whoever writes it. Providers verify signatures on the raw request, never on these copies.
         update_fields = kwargs.get("update_fields")
-        for name in _PAYLOAD_FIELDS:
+        for name in PAYLOAD_FIELDS:
             if update_fields is None or name in update_fields:
                 setattr(self, name, scrub_gateway_payload(getattr(self, name)))
         super().save(*args, **kwargs)
@@ -53,9 +53,9 @@ class PaymentIntent(models.Model):
 
         The columns (amount, currency, external_order_id, payment_status, code) stay: accounting needs them.
         """
-        if all(scrub_gateway_payload(getattr(self, name)) == getattr(self, name) for name in _PAYLOAD_FIELDS):
+        if all(scrub_gateway_payload(getattr(self, name)) == getattr(self, name) for name in PAYLOAD_FIELDS):
             return False
-        self.save(update_fields=list(_PAYLOAD_FIELDS))  # save() scrubs them
+        self.save(update_fields=list(PAYLOAD_FIELDS))  # save() scrubs them
         return True
 
 

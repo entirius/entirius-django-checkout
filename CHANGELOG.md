@@ -66,6 +66,9 @@
   or `canceled`. A caller that erases on request has to ship or cancel those orders first and repeat the request.
   Erase in checkout before deleting the account in django-accounts: afterwards checkout finds orders only by the
   e-mails they hold.
+- **Gateway payloads:** after the deploy run `manage.py scrub-gateway-payloads` (dry run, counts only), then
+  `manage.py scrub-gateway-payloads --apply`: payments stored before keep their whole payloads, buyer included,
+  until then. Idempotent; `--batch-size` sets the rows per batch (500).
 
 ### Fixed
 
@@ -194,6 +197,8 @@
 
 ### Added
 
+- `scrub-gateway-payloads`: puts every stored `provider_request` / `provider_notify` through the allowlist, in
+  batches (`iterator()` + `bulk_update`). Dry run unless `--apply`; the output holds counts only.
 - Docs: `docs/api/checkout.md` (Code usage) says what an order that loses the race for a code's last use leaves
   behind. It has already opened a payment session at the gateway when it rolls back; the customer never gets the
   session, no money moves, and the gateway keeps it as an abandoned, unpaid session.

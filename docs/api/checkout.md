@@ -2002,7 +2002,8 @@ is stored, and a notification that arrives after an erasure is stored the same w
 back. The PayU, PayPal, Stripe and Autopay notification views log and send to BI a payload only through the same
 scrub; Paynow and Przelewy24 notifications carry no buyer data. A payment stored before this release keeps its
 whole payloads until it is saved again (a later notification, an edit in the Django admin) or the customer is
-erased; nothing backfills them.
+erased. `manage.py scrub-gateway-payloads` reports how many still hold more (dry run) and reduces them with
+`--apply`.
 
 ### Customer erasure
 

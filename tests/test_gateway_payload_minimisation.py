@@ -19,10 +19,12 @@ Every personal value below is invented.
 import hashlib
 import json
 from dataclasses import dataclass, field
+from io import StringIO
 from types import SimpleNamespace
 
 import pytest
 from autopay_sdk.dto.order import Order as AutopayOrder
+from django.core.management import call_command
 from django.test import RequestFactory
 
 from django_checkout.domain.payment_provider.autopay_payment_provider import AutopayPaymentProvider
@@ -343,3 +345,62 @@ def test_a_late_notification_after_the_erasure_brings_no_buyer_data_back(channel
     intent.refresh_from_db()
     assert intent.payment_status == PaymentIntentStatus.CANCELLED
     assert intent.provider_notify == {"order": {"orderId": "PAYU-LATE-1", "status": "CANCELED"}}
+
+
+# --- Backfill of payments stored before -------------------------------------------------------------------------
+
+LEGACY_NOTIFY = {"order": {"orderId": "PAYU-OLD", "status": "COMPLETED", "buyer": {"email": EMAIL, "phone": PHONE}}}
+LEGACY_REQUEST = {"extOrderId": "25-000009", "totalAmount": "100", "customerIp": IP, "description": f"{FIRST} {LAST}"}
+
+
+def _legacy(channel, request=LEGACY_REQUEST, notify=LEGACY_NOTIFY) -> PaymentIntent:
+    """A payment as a release before stored it: the payloads written whole (``update()`` skips ``save()``)."""
+    intent = _intent(channel, PaymentProvider.PAYU, code=f"payu-{PaymentIntent.objects.count()}")
+    PaymentIntent.objects.filter(pk=intent.pk).update(provider_request=request, provider_notify=notify)
+    return intent
+
+
+def _scrub_gateway_payloads(*args) -> str:
+    out = StringIO()
+    call_command("scrub-gateway-payloads", *args, stdout=out)
+    return out.getvalue()
+
+
+@pytest.mark.django_db
+def test_scrub_gateway_payloads_is_a_dry_run_by_default(channel):
+    legacy = [_legacy(channel), _legacy(channel, notify=f"<itn><email>{EMAIL}</email></itn>")]
+    clean = _intent(channel, PaymentProvider.STRIPE)
+    clean.provider_notify = {"id": "cs_1", "payment_status": "paid"}
+    clean.save()
+    _intent(channel, PaymentProvider.COD)  # no payloads at all
+
+    output = _scrub_gateway_payloads()
+
+    assert "Payments with gateway payloads: 3; 2 hold data the allowlist drops" in output
+    assert _leftovers(output) == []
+    for intent in legacy:
+        intent.refresh_from_db()
+        assert intent.provider_request == LEGACY_REQUEST
+
+
+@pytest.mark.django_db
+def test_scrub_gateway_payloads_apply_reduces_them_in_batches_once(channel, monkeypatch):
+    legacy = [_legacy(channel) for _ in range(5)]
+    batches = []
+    bulk_update = PaymentIntent.objects.bulk_update
+    monkeypatch.setattr(
+        PaymentIntent.objects,
+        "bulk_update",
+        lambda rows, fields: batches.append(len(rows)) or bulk_update(rows, fields),
+    )
+
+    output = _scrub_gateway_payloads("--apply", "--batch-size", "2")
+
+    assert "Reduced the gateway payloads of 5 of 5 payments." in output
+    assert batches == [2, 2, 1]
+    for intent in legacy:
+        intent.refresh_from_db()
+        assert _leftovers(intent.provider_request, intent.provider_notify) == []
+        assert intent.provider_request == {"extOrderId": "25-000009", "totalAmount": "100"}
+        assert intent.provider_notify == {"order": {"orderId": "PAYU-OLD", "status": "COMPLETED"}}
+    assert "5; 0 hold data the allowlist drops" in _scrub_gateway_payloads()  # idempotent
