@@ -6,7 +6,7 @@
 
 An event is verified with the endpoint secret of the channel in the URL; without a non-empty
 secret nothing is verified, so nothing passes. A verified event reaches only a Stripe payment of
-that channel.
+that channel, and only moves it forward (``domain/payment_provider/notification_state.py``).
 
 Events are signed the way Stripe signs them (``t=...,v1=HMAC-SHA256``) and go through the real
 ``stripe.Webhook.construct_event``; nothing leaves the test.
@@ -21,6 +21,7 @@ import pytest
 import stripe
 from django.test import RequestFactory
 
+from django_checkout.domain.payment_provider import notification_state
 from django_checkout.enums import OrderStatus, PaymentIntentStatus, PaymentProvider
 from django_checkout.models import Order, PaymentIntent, PaymentMethod
 from django_checkout.views.payment_provider import stripe as stripe_views
@@ -188,3 +189,116 @@ def test_event_cannot_touch_another_gateways_payment(channel, customer, stripe_m
 
     assert response.status_code == 400
     assert _state(payment_intent) == UNTOUCHED
+
+
+# --- A session event only moves a payment forward ----------------------------------------
+
+
+@pytest.fixture
+def released(monkeypatch):
+    """Orders whose stock reservation was released."""
+    orders = []
+    monkeypatch.setattr(notification_state, "release_stock_reservation", orders.append)
+    # Before the shared rules the view released stock through its own import.
+    monkeypatch.setattr(stripe_views, "release_stock_reservation", orders.append, raising=False)
+    return orders
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "event_type,payment_status",
+    [(COMPLETED, "unpaid"), (EXPIRED, "unpaid"), (COMPLETED, "no_payment_required")],
+    ids=["late-unpaid", "late-expired", "unhandled-status"],
+)
+def test_late_event_leaves_a_completed_payment_alone(
+    channel, customer, stripe_method, released, event_type, payment_status
+):
+    payment_intent = _intent(channel, customer, stripe_method, PaymentIntentStatus.COMPLETE, OrderStatus.IN_PROGRESS)
+
+    response = _notify(channel, event_type, payment_status)
+
+    assert response.status_code == 200
+    assert _state(payment_intent) == (PaymentIntentStatus.COMPLETE, OrderStatus.IN_PROGRESS)
+    assert released == []
+
+
+@pytest.mark.django_db
+def test_expired_leaves_an_order_confirmed_by_hand(channel, customer, stripe_method, released):
+    payment_intent = _intent(channel, customer, stripe_method, order_status=OrderStatus.CONFIRMED)
+
+    _notify(channel, EXPIRED, "unpaid")
+
+    assert _state(payment_intent) == (PaymentIntentStatus.CANCELLED, OrderStatus.CONFIRMED)
+    assert released == []
+
+
+@pytest.mark.django_db
+def test_expired_cancels_an_order_still_waiting_and_releases_its_stock(channel, customer, stripe_method, released):
+    payment_intent = _intent(channel, customer, stripe_method)
+
+    _notify(channel, EXPIRED, "unpaid")
+    _notify(channel, EXPIRED, "unpaid")
+
+    assert _state(payment_intent) == (PaymentIntentStatus.CANCELLED, OrderStatus.CANCELED)
+    assert [order.pk for order in released] == [payment_intent.order_id]
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "order_status,expected_order_status",
+    [(OrderStatus.UNPAID, OrderStatus.CONFIRMED), (OrderStatus.IN_PROGRESS, OrderStatus.IN_PROGRESS)],
+    ids=["waiting-is-confirmed", "moved-on-is-kept"],
+)
+def test_paid_confirms_only_an_order_waiting_for_payment(
+    channel, customer, stripe_method, order_status, expected_order_status
+):
+    payment_intent = _intent(channel, customer, stripe_method, order_status=order_status)
+
+    _notify(channel, COMPLETED, "paid")
+
+    assert _state(payment_intent) == (PaymentIntentStatus.COMPLETE, expected_order_status)
+
+
+@pytest.mark.django_db
+def test_unhandled_status_on_an_open_payment_is_still_an_error(channel, customer, stripe_method):
+    payment_intent = _intent(channel, customer, stripe_method)
+
+    response = _notify(channel, COMPLETED, "no_payment_required")
+
+    assert response.status_code == 400
+    assert _state(payment_intent) == (PaymentIntentStatus.ERROR, OrderStatus.UNPAID)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "event_type,payment_status,finish_tag",
+    [
+        (COMPLETED, "paid", "PaymentIntent status is set to COMPLETE, Order status is set to CONFIRMED"),
+        (COMPLETED, "unpaid", "PaymentIntent status is set to PENDING"),
+        (EXPIRED, "unpaid", "PaymentIntent status is set to CANCELED"),
+        (COMPLETED, "no_payment_required", "Unsupported Stripe payment_status"),
+    ],
+    ids=["paid", "unpaid", "expired", "unsupported"],
+)
+def test_bi_finish_tags_keep_their_wording(
+    channel, customer, stripe_method, released, monkeypatch, event_type, payment_status, finish_tag
+):
+    """BI reports group notifications by finish tag; the state rules must not rename them."""
+    tags = []
+
+    class RecordingEvent:
+        def __init__(self, **kwargs):
+            pass
+
+        def finish_with_success(self, finish_tag, details=None):
+            tags.append(finish_tag)
+
+        def finish_with_error(self, finish_tag, details=None, error_message=None):
+            tags.append(finish_tag)
+
+    monkeypatch.setattr(stripe_views, "Checkout_StripeNotifyEvent", RecordingEvent)
+    _intent(channel, customer, stripe_method)
+
+    _notify(channel, event_type, payment_status)
+
+    assert tags == [finish_tag]
