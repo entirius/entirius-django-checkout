@@ -16,7 +16,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
-from django_checkout.api.v2.exceptions import cart_not_ready_response
+from django_checkout.api.v2.exceptions import CartNotReadyConflict
 from django_checkout.api.v2.mixins import CheckoutChannelMixin
 from django_checkout.api.v2.openapi import CHANNEL_PARAM, FILE_PARAM, ORDER_PARAM, PRETTY_ID_PARAM
 from django_checkout.api.v2.permissions import ChannelAPIKeyPermission
@@ -66,7 +66,8 @@ class OrderCreateView(CheckoutChannelMixin, APIView):
         except ObjectDoesNotExist:
             return Response({"error": "NOT_FOUND", "message": "Cart does not exist."}, status=404)
         except CartNotReady as exc:
-            return cart_not_ready_response(exc)
+            # ``status`` may name a SKU after the code ("OUT_OF_STOCK sku: X"); the message names it too.
+            raise CartNotReadyConflict(exc.message, code=exc.status.split()[0]) from exc
 
         response = OrderCreateResponse(
             order_id=str(result.order.order_id) if result.order else "",

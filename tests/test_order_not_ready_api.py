@@ -26,6 +26,16 @@ from django_checkout.services import cart_service
 
 factory = APIRequestFactory()
 
+
+@pytest.fixture(autouse=True)
+def v2_errors(settings):
+    """The service's v2 handler formats the 409, as in a deploy."""
+    settings.REST_FRAMEWORK = {
+        **settings.REST_FRAMEWORK,
+        "EXCEPTION_HANDLER": "django_utils.api.v2_errors.v2_exception_handler",
+    }
+
+
 ADDRESS = {
     "email": "buyer@test.com",
     "firstname": "Jan",
