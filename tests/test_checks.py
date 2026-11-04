@@ -79,3 +79,30 @@ def test_a_database_without_the_tables_reports_nothing(monkeypatch):
     monkeypatch.setattr(PaymentMethodQuerySet, "__iter__", no_table)
 
     assert _payu_warnings() == []
+
+
+PAYPAL_CHECK_ID = "django_checkout.W002"
+
+
+def _paypal_warnings() -> list:
+    messages = run_checks(tags=[Tags.database], databases=("default",))
+    return [message for message in messages if message.id == PAYPAL_CHECK_ID]
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("additional_data", [None, {}, {"client_id": "1"}, {"webhook_id": ""}])
+def test_paypal_method_without_webhook_id_is_reported(channel, additional_data):
+    _method(channel, "paypal", PaymentProvider.PAYPAL, additional_data)
+
+    (warning,) = _paypal_warnings()
+
+    assert "webhook_id" in warning.msg
+    assert "[test-channel] paypal" in warning.msg
+
+
+@pytest.mark.django_db
+def test_configured_and_non_paypal_methods_are_not_reported_as_paypal(channel):
+    _method(channel, "paypal", PaymentProvider.PAYPAL, {"client_id": "1", "webhook_id": "SYNTHETIC-WEBHOOK-ID"})
+    _method(channel, "payu", PaymentProvider.PAYU, {})
+
+    assert _paypal_warnings() == []

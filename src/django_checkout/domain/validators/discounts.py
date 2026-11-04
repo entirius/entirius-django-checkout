@@ -150,6 +150,14 @@ class CodeEligibility:
     is_logged: bool
     has_previous_order: bool
     uses_by_code: dict[str, int]
+    currency: str | None = None
+
+
+def rules_in_currency(currency: str | None) -> Q:
+    """Rules a cart in ``currency`` may use: those limited to it and those with no currencies (every currency)."""
+    if not currency:
+        return Q()
+    return Q(currencies__isnull=True) | Q(currencies__iso3=currency.upper())
 
 
 def diagnose_rejected_code(code: str, eligibility: CodeEligibility) -> tuple[str, dict]:
@@ -157,17 +165,27 @@ def diagnose_rejected_code(code: str, eligibility: CodeEligibility) -> tuple[str
 
     Only for codes that exist in this channel on an active, non-automatic rule; anything else (unknown, inactive,
     another channel's code) stays ``code_not_found``, so the reason never tells a shop about other shops' codes.
-    Checks run in a fixed order and the first that fails names the reason; customer filters and the
-    ``max_products_qty`` threshold are not told apart and stay ``code_not_found``.
+    A code whose rules all leave out the cart currency is ``currency_not_supported``; otherwise the checks run on the
+    first code in the cart currency, in a fixed order, and the first that fails names the reason; customer filters
+    and the ``max_products_qty`` threshold are not told apart and stay ``code_not_found``.
     """
     codes = DiscountCode.objects.select_related("rule").filter(
         code=code, rule__is_active=True, rule__automatic_applications=False
     )
     if eligibility.channel is not None:
         codes = codes.filter(rule__channels=eligibility.channel)
-    discount_code = codes.order_by("pk").first()
-    reason, meta = _first_failed_check(discount_code, eligibility) if discount_code else ("code_not_found", {})
+    reason, meta = _diagnose(codes, eligibility)
     return reason, {"code": code, **meta}
+
+
+def _diagnose(codes, eligibility: CodeEligibility) -> tuple[str, dict]:
+    in_currency = DiscountRuleCode.objects.filter(rules_in_currency(eligibility.currency))
+    discount_code = codes.filter(rule__in=in_currency).order_by("pk").first()
+    if discount_code:
+        return _first_failed_check(discount_code, eligibility)
+    if codes.exists():
+        return "currency_not_supported", {"currency": eligibility.currency}
+    return "code_not_found", {}
 
 
 def _first_failed_check(discount_code: DiscountCode, eligibility: CodeEligibility) -> tuple[str, dict]:
@@ -296,6 +314,7 @@ def validate_discounts(
 
     if channel:
         base_query = base_query.filter(channels=channel)
+    base_query = base_query.filter(rules_in_currency(currency))
 
     if discounts:
         discount_codes = [discount.code for discount in discounts]
@@ -406,6 +425,7 @@ def validate_discounts(
             is_logged=is_logged,
             has_previous_order=have_previous_order_by_email,
             uses_by_code=how_many_orders_user_with_discount_code_exists,
+            currency=currency,
         )
         all_discount_codes = list(
             DiscountCode.objects.select_related("rule")

@@ -57,6 +57,7 @@ from django_checkout.schemas.responses.discount import (
     ShippingMethodListResponse,
 )
 from django_checkout.services import discount_service
+from django_checkout.services.code_clashes import DiscountCodeClash
 
 _TAG = "Checkout Admin"
 
@@ -73,6 +74,11 @@ def _bad_request(message: str) -> Response:
 
 def _not_found(message: str = "Not found.") -> Response:
     return Response({"error": "NOT_FOUND", "message": message}, status=404)
+
+
+def _clash_error(exc: DiscountCodeClash) -> DRFValidationError:
+    """400 on the request field of the clashing code; the v2 handler reports it with issue ``UNIQUE``."""
+    return DRFValidationError({exc.field: [exc.clash.describe()]}, code="unique")
 
 
 def _read(schema_cls, request):
@@ -174,6 +180,8 @@ class AdminDiscountRuleListView(_AdminView):
         data = _read(DiscountRuleCreateInput, request)
         try:
             rule = discount_service.create_rule(self.get_channel(), data)
+        except DiscountCodeClash as exc:
+            raise _clash_error(exc) from exc
         except ValueError as exc:
             return _bad_request(str(exc))
         return Response(discount_service.serialize_rule_detail(rule), status=201)
@@ -229,6 +237,8 @@ class AdminDiscountRuleDetailView(_AdminView):
             rule = discount_service.update_rule(self.get_channel(), rule_id, data)
         except ObjectDoesNotExist as exc:
             return _not_found(str(exc))
+        except DiscountCodeClash as exc:
+            raise _clash_error(exc) from exc
         except ValueError as exc:
             return _bad_request(str(exc))
         return Response(discount_service.serialize_rule_detail(rule))
@@ -288,6 +298,8 @@ class AdminDiscountCodeListView(_AdminView):
             code = discount_service.create_code(self.get_channel(), rule_id, data)
         except ObjectDoesNotExist as exc:
             return _not_found(str(exc))
+        except DiscountCodeClash as exc:
+            raise _clash_error(exc) from exc
         return Response(discount_service.serialize_code(code), status=201)
 
 
@@ -305,6 +317,8 @@ class AdminDiscountCodeDetailView(_AdminView):
             code = discount_service.update_code(self.get_channel(), rule_id, code_id, data)
         except ObjectDoesNotExist as exc:
             return _not_found(str(exc))
+        except DiscountCodeClash as exc:
+            raise _clash_error(exc) from exc
         return Response(discount_service.serialize_code(code))
 
     @extend_schema(
