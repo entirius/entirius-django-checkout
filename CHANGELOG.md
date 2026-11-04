@@ -73,6 +73,12 @@
 
 ### Fixed
 
+- The cart charges the payment fee and the cash on delivery surcharge of the method that pays what the vouchers
+  leave, not of entry `[0]` of `payment_method` (client-visible: totals change). `[voucher, cod]` dropped both: with
+  a 23.00 voucher on 123.00, courier 10.00 + 5.00 cash on delivery and a 2.00 fee the cart asked 110.00 instead of
+  117.00, and `Order.create` already confirmed it as cash on delivery. A gateway's fee is charged in either order;
+  when the vouchers cover the whole cart no method settles anything, the cart drops the gateway and charges no fee
+  (`[payu, voucher]` asked 2.00 at PayU for the fee alone).
 - Stripe: a line of several units with a cart discount is charged its discounted total. Its `unit_amount` was the
   unit price less the discount of the whole line, and Stripe multiplies `unit_amount` by the quantity: 3 x 54.99 at
   15 % off charged 90.72 instead of 140.22, and a large discount sent a negative amount Stripe refused. Lines carry

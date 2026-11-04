@@ -11,7 +11,7 @@ from django_utils.api.responses import ErrorInfo
 from django_checkout.domain.dto.cart import CartRequest, CheckoutData
 from django_checkout.domain.dto.discount import DiscountsRejectedError
 from django_checkout.domain.dto.item import SkuQuantityData
-from django_checkout.domain.payment_selection import is_voucher_method
+from django_checkout.domain.payment_selection import is_voucher_method, settling_payment_method
 from django_checkout.domain.prices import calc_fee_of_price
 from django_checkout.domain.validators.address import validate_addresses
 from django_checkout.domain.validators.cart import check_min_order_price, validate_cart_data
@@ -154,6 +154,9 @@ def process_cart(
     # processing reaches discount/fee/order create paths below.
     validated_payment = validated_payments[0] if validated_payments else None
     payment_method = payment_methods[0] if payment_methods else None
+    # Cash on delivery and the fee belong to the method that settles what the vouchers leave, as in Order.create:
+    # entry [0] may be a voucher, which carries neither.
+    settling_method = settling_payment_method(payment_methods)
     messages.extend(msgs)
 
     # Provider-specific cart attachment (e.g. voucher pay_code → CartVoucher rows).
@@ -283,8 +286,8 @@ def process_cart(
                 validated_shipping.discount_amount = validated_shipping.unit_price
                 validated_shipping.unit_price = Decimal(0)
             elif (
-                validated_payment is not None
-                and validated_payment.is_cash_on_delivery
+                settling_method is not None
+                and settling_method.is_cash_on_delivery
                 and validated_shipping.cash_on_delivery_fee is not None
                 and validated_shipping.total_price > 0
             ):
@@ -341,11 +344,13 @@ def process_cart(
     fee_price = Decimal(0)
     fee_tax_rate = Decimal(0)
     fee_tax_price = Decimal(0)
+    voucher_paid = Decimal(str(validated_cart_data.voucher_amount_applied or 0))
 
     if split_order_data:
         fee_price = split_order_data.fee_price
-    elif payment_method:
-        fee_price = calc_fee_of_price(payment_method, total)
+    elif settling_method and not (voucher_paid > 0 and total <= 0):
+        # With the vouchers covering everything the method settles nothing: it is dropped below, its fee with it.
+        fee_price = calc_fee_of_price(settling_method, total)
         fee_tax_rate = validated_shipping.tax_rate if validated_shipping else Decimal(0)
         fee_tax_price = round(fee_price - (fee_price / (1 + fee_tax_rate)), 2) if fee_tax_rate else Decimal(0)
 
@@ -387,7 +392,6 @@ def process_cart(
             if not PaymentProvider.is_voucher(getattr(pm, "provider", None), getattr(pm, "code", None))
         ]
         remaining_to_pay = Decimal(str(total or 0))
-        voucher_paid = Decimal(str(validated_cart_data.voucher_amount_applied or 0))
         if not non_voucher_pm and remaining_to_pay > Decimal("0"):
             voucher_coverage_insufficient = True
             cart_total_before_voucher = voucher_paid + remaining_to_pay
