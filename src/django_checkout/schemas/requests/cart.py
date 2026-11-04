@@ -4,6 +4,8 @@
 
 from pydantic import BaseModel, Field, field_validator
 
+from django_checkout.domain.payment_redirect_target import is_allowed_continue_url
+
 # Opaque to checkout, but persisted verbatim into cart_body/order_body and echoed on
 # every GET — bound it so an anonymous caller can't write an unbounded blob.
 _VOUCHER_GIFT_MAX_KEYS = 12
@@ -134,6 +136,24 @@ class PaymentPatchRequest(BaseModel):
         description="Voucher code(s) to apply via this payment method, format 'CODE:PIN,CODE2' (PIN optional per code).",
         examples=["26WT1234:1234"],
     )
+    continue_url: str | None = Field(
+        None,
+        description=(
+            "Where the payment gateway sends the customer back after paying; `<order_id>` is replaced by the order "
+            "number. A scheme in `PAYMENT_REDIRECT_DIRECT_SCHEMES` goes to the gateway as it is, any other target "
+            "must pass the payment bridge (`PAYMENT_REDIRECT_BRIDGE_TARGET_SCHEMES`, `PAYMENT_REDIRECT_ALLOWED_HOSTS` "
+            "for http/https). Stored with the payment method, never returned in a response."
+        ),
+        examples=["https://shop.example.org/checkout/success?ref=<order_id>"],
+    )
+
+    @field_validator("continue_url")
+    @classmethod
+    def _allowed_return_target(cls, value: str | None) -> str | None:
+        """The gateway call refuses any other target; refusing it here tells the client before the order."""
+        if value is not None and not is_allowed_continue_url(value):
+            raise ValueError("continue_url target is not allowed")
+        return value
 
 
 class CartMergeRequest(BaseModel):

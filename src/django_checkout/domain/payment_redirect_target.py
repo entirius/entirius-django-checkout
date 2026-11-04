@@ -15,7 +15,7 @@ after the row was written). Keeping one implementation means the two cannot drif
 disagreeing about what is allowed.
 """
 
-from urllib.parse import ParseResult
+from urllib.parse import ParseResult, urlparse
 
 from django_checkout import settings
 
@@ -35,3 +35,13 @@ def is_allowed_bridge_target(parsed: ParseResult) -> bool:
     # contains "shop.example", but the browser navigates to evil.com. hostname is the
     # destination that actually matters, already lowercased and stripped of the port.
     return parsed.hostname in set(settings.PAYMENT_REDIRECT_ALLOWED_HOSTS)
+
+
+def is_allowed_continue_url(raw_url: str) -> bool:
+    """True when a payment may send the customer back to ``raw_url``, as ``resolve_continue_url`` decides it.
+
+    A direct scheme goes to the gateway as it is; any other target goes through the bridge and must be one the
+    bridge may redirect to.
+    """
+    parsed = urlparse(raw_url)
+    return parsed.scheme in settings.PAYMENT_REDIRECT_DIRECT_SCHEMES or is_allowed_bridge_target(parsed)
