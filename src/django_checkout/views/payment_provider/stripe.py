@@ -15,6 +15,7 @@ from process_logger import ProcessLogger
 from django_checkout.domain.payment_provider.notification_state import apply_payment_status, lock_payment_intent
 from django_checkout.enums import PaymentIntentStatus, PaymentProvider
 from django_checkout.models import PaymentIntent, PaymentMethod
+from django_checkout.utils.gateway_payload import scrub_gateway_payload
 
 from ...bi import Checkout_StripeNotifyEvent
 
@@ -51,18 +52,12 @@ def stripe_notify(request: WSGIRequest, channel_idx: str = None, *args, **kwargs
         event = stripe.Webhook.construct_event(request.body, sig_header, endpoint_secret)
     except ValueError as e:
         logger_process.exception(e)
-        bev.finish_with_error(
-            finish_tag="Stripe response error", details={"stripe_response": request.body}, error_message=str(e)
-        )
+        bev.finish_with_error(finish_tag="Stripe response error", error_message=str(e))
         return Response(data={"message": "For more information see log"}, status="FAIL", status_code=400)
     except stripe.error.SignatureVerificationError as e:
         # Invalid signature
         logger_process.exception(e)
-        bev.finish_with_error(
-            finish_tag="Error verifying webhook signature",
-            details={"stripe_response": request.body},
-            error_message=str(e),
-        )
+        bev.finish_with_error(finish_tag="Error verifying webhook signature", error_message=str(e))
         return Response(data={"message": "For more information see log"}, status="FAIL", status_code=400)
 
     if event.type in ["checkout.session.completed", "checkout.session.expired"]:
@@ -78,9 +73,10 @@ def stripe_notify(request: WSGIRequest, channel_idx: str = None, *args, **kwargs
             external_order_id=stripe_order_id, order__channel__idx=channel_idx, method__provider=PaymentProvider.STRIPE
         ).first()
         if not payment_intent:
-            extra = {"stripe_order_id": stripe_order_id, "stripe_response": stripe_checkout, "is_status_changed": False}
-            logger_process.add_log_param("stripe_order_id", stripe_checkout)
-            logger_process.add_log_param("stripe_response", stripe_checkout)
+            logged_checkout = scrub_gateway_payload(stripe_checkout)  # no customer_details in logs and BI
+            extra = {"stripe_order_id": stripe_order_id, "stripe_response": logged_checkout, "is_status_changed": False}
+            logger_process.add_log_param("stripe_order_id", stripe_order_id)
+            logger_process.add_log_param("stripe_response", logged_checkout)
             logger_process.add_log_param("is_status_changed", False)
             logger_process.error("There is no PaymentIntent object with given order ID from Stripe")
             bev.finish_with_error(finish_tag="Can not find related PaymentIntent object", details=extra)

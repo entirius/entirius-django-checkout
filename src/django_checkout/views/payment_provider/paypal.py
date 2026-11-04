@@ -25,6 +25,7 @@ from django_checkout.domain.payment_provider.paypal_webhook import WEBHOOK_ID_FI
 from django_checkout.enums import PaymentIntentStatus, PaymentProvider
 from django_checkout.models import PaymentIntent
 from django_checkout.settings import PAYPAL_CAPTURE_PAYMENT_AFTER_APPROVED_ORDER_WEBHOOK
+from django_checkout.utils.gateway_payload import scrub_gateway_payload
 
 from ...bi import Checkout_PayPalCancelEvent, Checkout_PayPalNotifyEvent, Checkout_PayPalReturnEvent
 
@@ -92,19 +93,16 @@ def paypal_notify(request: WSGIRequest, *args, **kwargs):
         body = json.loads(request.body)
     except Exception as e:
         logger_process.exception(e)
-        bev.finish_with_error(
-            finish_tag="PayPal response error, body not in json format",
-            details={"paypal_response": request.body},
-            error_message=str(e),
-        )
+        bev.finish_with_error(finish_tag="PayPal response error, body not in json format", error_message=str(e))
         return Response(data={"message": "For more information see log"}, status="FAIL", status_code=200)
 
+    logged_body = scrub_gateway_payload(body)  # what logs and BI may keep of it: no payer data
     is_complete_payment_event = body.get("event_type", "") == "PAYMENT.CAPTURE.COMPLETED"
 
     # Validation: do we have valid order_id in response?
     if "resource" not in body or "id" not in body["resource"]:
-        extra = {"paypal_response": body, "is_status_changed": False}
-        logger_process.add_log_param("paypal_response", body)
+        extra = {"paypal_response": logged_body, "is_status_changed": False}
+        logger_process.add_log_param("paypal_response", logged_body)
         logger_process.add_log_param("is_status_changed", False)
         logger_process.error("There was a problem with response from PayPal, can not find orderId in response body")
         bev.finish_with_error(finish_tag="PayPal response error, can not find id in response body", details=extra)
@@ -115,8 +113,8 @@ def paypal_notify(request: WSGIRequest, *args, **kwargs):
             body.get("resource", {}).get("supplementary_data", {}).get("related_ids", {}).get("order_id", None)
         )
         if not paypal_order_id:
-            extra = {"paypal_response": body, "is_status_changed": False}
-            logger_process.add_log_param("paypal_response", body)
+            extra = {"paypal_response": logged_body, "is_status_changed": False}
+            logger_process.add_log_param("paypal_response", logged_body)
             logger_process.add_log_param("is_status_changed", False)
             logger_process.error(
                 "There was a problem with response from PayPal, can not find orderId in supplementary_data"
@@ -131,9 +129,9 @@ def paypal_notify(request: WSGIRequest, *args, **kwargs):
 
     payment_intent: PaymentIntent = PaymentIntent.objects.filter(external_order_id=paypal_order_id).first()
     if not payment_intent:
-        extra = {"paypal_order_id": paypal_order_id, "paypal_response": body, "is_status_changed": False}
+        extra = {"paypal_order_id": paypal_order_id, "paypal_response": logged_body, "is_status_changed": False}
         logger_process.add_log_param("paypal_order_id", paypal_order_id)
-        logger_process.add_log_param("paypal_response", body)
+        logger_process.add_log_param("paypal_response", logged_body)
         logger_process.add_log_param("is_status_changed", False)
         logger_process.error("There is no PaymentIntent object with given if from PayPal")
         bev.finish_with_error(finish_tag="Can not find related PaymentIntent object", details=extra)
@@ -152,9 +150,9 @@ def paypal_notify(request: WSGIRequest, *args, **kwargs):
 
     # Validation: do we have valid status field in response?
     if "status" not in body["resource"]:
-        extra = {"paypal_order_id": paypal_order_id, "payu_response": body, "is_status_changed": False}
+        extra = {"paypal_order_id": paypal_order_id, "payu_response": logged_body, "is_status_changed": False}
         logger_process.add_log_param("paypal_order_id", paypal_order_id)
-        logger_process.add_log_param("paypal_response", body)
+        logger_process.add_log_param("paypal_response", logged_body)
         logger_process.add_log_param("is_status_changed", False)
         logger_process.error("There was a problem with the response body coming from PayPal, can not find status field")
         bev.finish_with_error(finish_tag="Payu response error, can not find status field", details=extra)

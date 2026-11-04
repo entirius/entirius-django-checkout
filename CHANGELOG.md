@@ -79,6 +79,12 @@
   already redacted) becomes `***REDACTED***`, so a link still open answers 404. The request also finds orders by those e-mail columns and by the e-mail a used code stored (the account
   e-mail of a deleted account), so repeating it completes an order an earlier erasure left half done. New command
   `complete-erasures` finishes the orders and carts erased before this release (dry run unless `--apply`).
+- Log lines and BI events no longer carry a customer's personal data. The admin order preview (v2
+  `GET admin/{channel}/orders/{uid}/`) logged the billing e-mail and now logs the order id; the PayU, PayPal and
+  Stripe notification views logged and sent to BI the whole notification (buyer, payer, `customer_details`) and now
+  keep only what `scrub_gateway_payload` keeps (ids, amounts, statuses), a body that is no JSON not at all; the
+  Autopay ITN view no longer logs its XML (`customerData` is the buyer); a failed v1 order logs the customer's pk, not
+  `str(customer)` (the username, which is the e-mail); Paynow's invalid-phone line no longer names the number.
 - Stripe: a line of several units with a cart discount is charged its discounted total. Its `unit_amount` was the
   unit price less the discount of the whole line, and Stripe multiplies `unit_amount` by the quantity: 3 x 54.99 at
   15 % off charged 90.72 instead of 140.22, and a large discount sent a negative amount Stripe refused. Lines carry
