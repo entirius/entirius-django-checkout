@@ -20,7 +20,6 @@ Resource map (under api-admin/checkout/v2/{channel_idx}/):
     discount-rules/{rule_id}/customer-filters/{id}/  PATCH, DELETE
 """
 
-from django.core.exceptions import ObjectDoesNotExist
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from pydantic import ValidationError
 from rest_framework.exceptions import ValidationError as DRFValidationError
@@ -58,6 +57,7 @@ from django_checkout.schemas.responses.discount import (
 )
 from django_checkout.services import discount_service
 from django_checkout.services.code_clashes import DiscountCodeClash
+from django_checkout.services.exceptions import DiscountObjectNotFound, InvalidDiscountInput
 
 _TAG = "Checkout Admin"
 
@@ -68,17 +68,17 @@ class _AdminView(CheckoutChannelMixin, APIView):
     access_area = "checkout.discounts"
 
 
-def _bad_request(message: str) -> Response:
-    return Response({"error": "VALIDATION_ERROR", "message": message}, status=400)
+def _bad_request(refusal: InvalidDiscountInput) -> Response:
+    return Response({"error": "VALIDATION_ERROR", "message": refusal.client_message}, status=400)
 
 
-def _not_found(message: str = "Not found.") -> Response:
-    return Response({"error": "NOT_FOUND", "message": message}, status=404)
+def _not_found(refusal: DiscountObjectNotFound) -> Response:
+    return Response({"error": "NOT_FOUND", "message": refusal.client_message}, status=404)
 
 
 def _clash_error(exc: DiscountCodeClash) -> DRFValidationError:
     """400 on the request field of the clashing code; the v2 handler reports it with issue ``UNIQUE``."""
-    return DRFValidationError({exc.field: [exc.clash.describe()]}, code="unique")
+    return DRFValidationError({exc.field: [exc.client_message]}, code="unique")
 
 
 def _read(schema_cls, request):
@@ -182,8 +182,8 @@ class AdminDiscountRuleListView(_AdminView):
             rule = discount_service.create_rule(self.get_channel(), data)
         except DiscountCodeClash as exc:
             raise _clash_error(exc) from exc
-        except ValueError as exc:
-            return _bad_request(str(exc))
+        except InvalidDiscountInput as exc:
+            return _bad_request(exc)
         return Response(discount_service.serialize_rule_detail(rule), status=201)
 
 
@@ -205,8 +205,8 @@ class AdminDiscountRuleBulkView(_AdminView):
                 all_matching=data.all_matching,
                 params=data.filters,
             )
-        except ValueError as exc:
-            return _bad_request(str(exc))
+        except InvalidDiscountInput as exc:
+            return _bad_request(exc)
         return Response({"affected": affected})
 
 
@@ -220,8 +220,8 @@ class AdminDiscountRuleDetailView(_AdminView):
     def get(self, request, channel_idx, rule_id, **kwargs):
         try:
             rule = discount_service.get_rule(self.get_channel(), rule_id)
-        except ObjectDoesNotExist as exc:
-            return _not_found(str(exc))
+        except DiscountObjectNotFound as exc:
+            return _not_found(exc)
         return Response(discount_service.serialize_rule_detail(rule))
 
     @extend_schema(
@@ -235,12 +235,12 @@ class AdminDiscountRuleDetailView(_AdminView):
         data = _read(DiscountRuleUpdateInput, request)
         try:
             rule = discount_service.update_rule(self.get_channel(), rule_id, data)
-        except ObjectDoesNotExist as exc:
-            return _not_found(str(exc))
+        except DiscountObjectNotFound as exc:
+            return _not_found(exc)
         except DiscountCodeClash as exc:
             raise _clash_error(exc) from exc
-        except ValueError as exc:
-            return _bad_request(str(exc))
+        except InvalidDiscountInput as exc:
+            return _bad_request(exc)
         return Response(discount_service.serialize_rule_detail(rule))
 
     @extend_schema(
@@ -252,8 +252,8 @@ class AdminDiscountRuleDetailView(_AdminView):
     def delete(self, request, channel_idx, rule_id, **kwargs):
         try:
             discount_service.delete_rule(self.get_channel(), rule_id)
-        except ObjectDoesNotExist as exc:
-            return _not_found(str(exc))
+        except DiscountObjectNotFound as exc:
+            return _not_found(exc)
         return Response(status=204)
 
 
@@ -279,8 +279,8 @@ class AdminDiscountCodeListView(_AdminView):
     def get(self, request, channel_idx, rule_id, **kwargs):
         try:
             queryset = discount_service.list_codes(self.get_channel(), rule_id, request.query_params)
-        except ObjectDoesNotExist as exc:
-            return _not_found(str(exc))
+        except DiscountObjectNotFound as exc:
+            return _not_found(exc)
         paginator = AdminPageNumberPagination()
         page = paginator.paginate_queryset(queryset, request)
         return paginator.get_paginated_response([discount_service.serialize_code(code) for code in page])
@@ -296,8 +296,8 @@ class AdminDiscountCodeListView(_AdminView):
         data = _read(DiscountCodeInput, request)
         try:
             code = discount_service.create_code(self.get_channel(), rule_id, data)
-        except ObjectDoesNotExist as exc:
-            return _not_found(str(exc))
+        except DiscountObjectNotFound as exc:
+            return _not_found(exc)
         except DiscountCodeClash as exc:
             raise _clash_error(exc) from exc
         return Response(discount_service.serialize_code(code), status=201)
@@ -315,8 +315,8 @@ class AdminDiscountCodeDetailView(_AdminView):
         data = _read(DiscountCodeUpdateInput, request)
         try:
             code = discount_service.update_code(self.get_channel(), rule_id, code_id, data)
-        except ObjectDoesNotExist as exc:
-            return _not_found(str(exc))
+        except DiscountObjectNotFound as exc:
+            return _not_found(exc)
         except DiscountCodeClash as exc:
             raise _clash_error(exc) from exc
         return Response(discount_service.serialize_code(code))
@@ -327,8 +327,8 @@ class AdminDiscountCodeDetailView(_AdminView):
     def delete(self, request, channel_idx, rule_id, code_id, **kwargs):
         try:
             discount_service.delete_code(self.get_channel(), rule_id, code_id)
-        except ObjectDoesNotExist as exc:
-            return _not_found(str(exc))
+        except DiscountObjectNotFound as exc:
+            return _not_found(exc)
         return Response(status=204)
 
 
@@ -338,8 +338,8 @@ class AdminDiscountCodeDetailView(_AdminView):
 def _list_filters(view, rule_id, kind):
     try:
         filters = discount_service.list_product_filters(view.get_channel(), rule_id, kind)
-    except ObjectDoesNotExist as exc:
-        return _not_found(str(exc))
+    except DiscountObjectNotFound as exc:
+        return _not_found(exc)
     return Response({"results": [discount_service.serialize_product_filter(f) for f in filters]})
 
 
@@ -347,10 +347,10 @@ def _create_filter(view, request, rule_id, kind):
     data = _read(ProductFilterInput, request)
     try:
         filter_obj = discount_service.create_product_filter(view.get_channel(), rule_id, data, kind)
-    except ObjectDoesNotExist as exc:
-        return _not_found(str(exc))
-    except ValueError as exc:
-        return _bad_request(str(exc))
+    except DiscountObjectNotFound as exc:
+        return _not_found(exc)
+    except InvalidDiscountInput as exc:
+        return _bad_request(exc)
     return Response(discount_service.serialize_product_filter(filter_obj), status=201)
 
 
@@ -358,18 +358,18 @@ def _update_filter(view, request, rule_id, filter_id, kind):
     data = _read(ProductFilterInput, request)
     try:
         filter_obj = discount_service.update_product_filter(view.get_channel(), rule_id, filter_id, data, kind)
-    except ObjectDoesNotExist as exc:
-        return _not_found(str(exc))
-    except ValueError as exc:
-        return _bad_request(str(exc))
+    except DiscountObjectNotFound as exc:
+        return _not_found(exc)
+    except InvalidDiscountInput as exc:
+        return _bad_request(exc)
     return Response(discount_service.serialize_product_filter(filter_obj))
 
 
 def _delete_filter(view, rule_id, filter_id, kind):
     try:
         discount_service.delete_product_filter(view.get_channel(), rule_id, filter_id, kind)
-    except ObjectDoesNotExist as exc:
-        return _not_found(str(exc))
+    except DiscountObjectNotFound as exc:
+        return _not_found(exc)
     return Response(status=204)
 
 
@@ -470,8 +470,8 @@ class AdminCustomerFilterListView(_AdminView):
     def get(self, request, channel_idx, rule_id, **kwargs):
         try:
             filters = discount_service.list_customer_filters(self.get_channel(), rule_id)
-        except ObjectDoesNotExist as exc:
-            return _not_found(str(exc))
+        except DiscountObjectNotFound as exc:
+            return _not_found(exc)
         return Response({"results": [discount_service.serialize_customer_filter(f) for f in filters]})
 
     @extend_schema(
@@ -485,10 +485,10 @@ class AdminCustomerFilterListView(_AdminView):
         data = _read(CustomerFilterInput, request)
         try:
             filter_obj = discount_service.create_customer_filter(self.get_channel(), rule_id, data)
-        except ObjectDoesNotExist as exc:
-            return _not_found(str(exc))
-        except ValueError as exc:
-            return _bad_request(str(exc))
+        except DiscountObjectNotFound as exc:
+            return _not_found(exc)
+        except InvalidDiscountInput as exc:
+            return _bad_request(exc)
         return Response(discount_service.serialize_customer_filter(filter_obj), status=201)
 
 
@@ -504,10 +504,10 @@ class AdminCustomerFilterDetailView(_AdminView):
         data = _read(CustomerFilterInput, request)
         try:
             filter_obj = discount_service.update_customer_filter(self.get_channel(), rule_id, filter_id, data)
-        except ObjectDoesNotExist as exc:
-            return _not_found(str(exc))
-        except ValueError as exc:
-            return _bad_request(str(exc))
+        except DiscountObjectNotFound as exc:
+            return _not_found(exc)
+        except InvalidDiscountInput as exc:
+            return _bad_request(exc)
         return Response(discount_service.serialize_customer_filter(filter_obj))
 
     @extend_schema(
@@ -519,6 +519,6 @@ class AdminCustomerFilterDetailView(_AdminView):
     def delete(self, request, channel_idx, rule_id, filter_id, **kwargs):
         try:
             discount_service.delete_customer_filter(self.get_channel(), rule_id, filter_id)
-        except ObjectDoesNotExist as exc:
-            return _not_found(str(exc))
+        except DiscountObjectNotFound as exc:
+            return _not_found(exc)
         return Response(status=204)
