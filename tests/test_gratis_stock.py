@@ -389,6 +389,20 @@ class TestAGiftOfASkuTheCustomerBuys:
             (GIFT_SKU, True),
         ]
 
+    def test_each_line_weighs_its_own_pieces(
+        self, channel, supplier, gratis_code, priced_catalog, coffee_in_stock, catalog
+    ):
+        """Two mugs weigh 4 together, the bought line and the gift line 2 each."""
+        real_product = catalog[GIFT_SKU].real_product
+        real_product.weight = 2
+        real_product.save()
+        _stock(channel, supplier, GIFT_SKU, quantity=5)
+
+        record = _buy_a_mug_and_claim_another(channel)
+
+        mugs = [(item.is_gratis, item.total_weight) for item in record.as_data.cart.items if item.sku == GIFT_SKU]
+        assert mugs == [(False, Decimal("2")), (True, Decimal("2"))]
+
     def test_the_gift_is_refused_when_the_bought_mugs_take_the_whole_stock(
         self, channel, supplier, gratis_code, priced_catalog, coffee_in_stock
     ):
@@ -424,10 +438,10 @@ class TestTheLimitsCountBothLines:
         real_product.save()
         lines = [SimpleNamespace(sku=GIFT_SKU, quantity=1), SimpleNamespace(sku=GIFT_SKU, quantity=3)]
 
-        total, _, by_sku = cart_limiters.check_items_weight(lines, channel)
+        total, _, unit_weights = cart_limiters.check_items_weight(lines, channel)
 
         assert total == 8
-        assert by_sku == {GIFT_SKU: 8}
+        assert unit_weights == {GIFT_SKU: 2}
 
     def test_volume(self, monkeypatch):
         monkeypatch.setattr(cart_limiters, "get_volumes_by_sku", lambda channel_idx, skus: {GIFT_SKU: 2})

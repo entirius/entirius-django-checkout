@@ -40,6 +40,10 @@ def _quantities_by_sku(items: list[SkuQuantityData]) -> dict:
 
 
 def check_items_weight(items: list[SkuQuantityData], channel: "Channel"):
+    """Weight of every piece together, whether a product lacks a weight, and the weight of one piece per SKU.
+
+    A SKU can sit on two lines (bought and gift), so a line weighs its own quantity times the unit weight.
+    """
     sku_list = [elem.sku for elem in items]
     data = Product.objects.filter(shop__idx=channel.idx, real_product__sku__in=sku_list).values(
         "real_product__sku", "real_product__weight"
@@ -55,18 +59,17 @@ def check_items_weight(items: list[SkuQuantityData], channel: "Channel"):
     ]
 
     item_sum_weight = 0
-    items_weight = {}
+    unit_weights = {}
     items_dont_have_weight = False
     for item in result:
         if not item["real_product__weight"]:
             items_dont_have_weight = True
-            items_weight[item["real_product__sku"]] = None
+            unit_weights[item["real_product__sku"]] = None
         else:
-            line_weight = item["quantity"] * item["real_product__weight"]
-            item_sum_weight += line_weight
-            items_weight[item["real_product__sku"]] = line_weight
+            item_sum_weight += item["quantity"] * item["real_product__weight"]
+            unit_weights[item["real_product__sku"]] = item["real_product__weight"]
 
-    return item_sum_weight, items_dont_have_weight, items_weight
+    return item_sum_weight, items_dont_have_weight, unit_weights
 
 
 def check_cart_is_too_heavy(item_sum_weight: list[SkuQuantityData], shipping_method: "ShippingMethod"):
