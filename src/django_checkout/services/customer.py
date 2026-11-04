@@ -7,8 +7,29 @@ from dataclasses import dataclass, field
 from django.db.models import Q, QuerySet
 from process_logger import ProcessLoggerMixin
 
+from django_checkout.enums import OrderStatus
 from django_checkout.models import Cart, Channel, Order, UsedCoupon
 from django_checkout.signals import customer_anonymized_signal
+
+# The shop has nothing left to do with an order in these statuses: delivered, returned or cancelled. Any other one
+# (waiting for payment, confirmed, on hold, in progress) still needs the delivery address and the contact, so an
+# erasure is refused while the customer has such an order.
+SETTLED_ORDER_STATUSES = (OrderStatus.COMPLETED, OrderStatus.RETURNED, OrderStatus.CANCELED)
+
+
+@dataclass(frozen=True)
+class BlockingOrder:
+    order_id: str
+    pretty_id: str | None
+    status: str
+
+
+class ErasureBlocked(Exception):
+    """The customer has orders the shop has not fulfilled yet; nothing was anonymised."""
+
+    def __init__(self, orders: list[BlockingOrder]):
+        super().__init__(f"Erasure refused: {len(orders)} order(s) not fulfilled yet")
+        self.orders = orders
 
 
 @dataclass
@@ -27,6 +48,16 @@ class _Erasure:
 
 def _in_channel(queryset: QuerySet, channel: Channel | None) -> QuerySet:
     return queryset if channel is None else queryset.filter(channel=channel)
+
+
+def _refuse_unsettled(orders: list[Order]) -> None:
+    blocking = [
+        BlockingOrder(str(order.order_id), order.pretty_id_snap, order.order_status)
+        for order in orders
+        if order.order_status not in SETTLED_ORDER_STATUSES
+    ]
+    if blocking:
+        raise ErasureBlocked(blocking)
 
 
 def _orders_of(email: str) -> QuerySet:
@@ -49,9 +80,14 @@ class CustomerService(ProcessLoggerMixin):
     def anonymize_customer(
         self, email: str, channel: Channel | None = None
     ) -> tuple[bool, list[str], list[str], list[str], list[str]]:
-        """Anonymise the orders and carts of ``email``: in ``channel`` only, or in every channel when None."""
+        """Anonymise the orders and carts of ``email``: in ``channel`` only, or in every channel when None.
+
+        Raises ``ErasureBlocked`` before anything is written while one of the orders is not settled yet.
+        """
+        orders = list(_in_channel(_orders_of(email), channel))
+        _refuse_unsettled(orders)
         erasure = _Erasure()
-        for order in _in_channel(_orders_of(email), channel):
+        for order in orders:
             if self._anonymize_order(order, erasure) and order.cart is not None:
                 self._anonymize_cart(order.cart, erasure)
         carts = Cart.objects.filter(Q(customer__user__email=email) | Q(cart_body__icontains=email))

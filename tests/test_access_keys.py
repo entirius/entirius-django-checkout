@@ -279,15 +279,17 @@ def _rows(channel, label: str) -> list:
     from django.contrib.auth import get_user_model
     from django_accounts.models import Customer
 
+    from django_checkout.enums import OrderStatus
     from django_checkout.models import Cart, Order
 
     user = get_user_model().objects.create_user(username=f"{label}-{ERASED}", email=ERASED)
     customer = Customer.objects.create(user=user)
     by_customer, by_body = {"customer": customer, "channel": channel}, {"channel": channel}
+    delivered = {"order_status": OrderStatus.COMPLETED}  # an order still to fulfil refuses the erasure
     return [
-        Order.objects.create(order_body=_body("someone@test.com"), **by_customer),
+        Order.objects.create(order_body=_body("someone@test.com"), **by_customer, **delivered),
         Cart.objects.create(cart_body=_body("someone@test.com"), **by_customer),
-        Order.objects.create(order_body=_body(ERASED), **by_body),
+        Order.objects.create(order_body=_body(ERASED), **by_body, **delivered),
         Cart.objects.create(cart_body=_body(ERASED), **by_body),
     ]
 

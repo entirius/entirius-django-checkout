@@ -149,6 +149,10 @@ toggles and defaults: `docs/configuration.md`.
   every personal field checkout stores. A new one goes into the scrub with it: body fields in `utils` (`_PII_FIELDS`,
   `_BODY_PII_FIELDS`), columns and related rows in `Order.anonymize`. Gateway payloads keep an allowlist
   (`utils/gateway_payload.py`): a key accounting needs is added there, anything else is dropped on erasure.
+  `CustomerService.anonymize_customer` refuses (`ErasureBlocked`, v1 409 `OPEN_ORDERS`) before writing anything while
+  one of the orders is outside `SETTLED_ORDER_STATUSES`: the check lives in the service so every entry point gets it.
+  `complete-erasures` calls `anonymize()` itself and is never refused. Integrators erase in checkout before deleting
+  the account in `django_accounts`; the other way round orders are found only by the e-mails they hold.
 - A discount code is unique per (channel, currency), a rule without currencies covering every currency
   (`services/code_clashes.py`, `docs/api/discounts.md`). Every write path (v2 admin service, Django admin forms,
   `import-discount-rules`) calls `refuse_clash` / `refuse_scope_change`; a new one must too. No DB constraint

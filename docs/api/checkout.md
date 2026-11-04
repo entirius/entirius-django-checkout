@@ -2009,7 +2009,50 @@ order an earlier one left half done. A pinned erase token covers its channel onl
 
 Names and free text become `x` of the same length, e-mails `x…x@example.com`. Not touched: invoices
 (`Invoice.invoice_base64`, kept for accounting), order attachments, shipping tracking numbers, `Order.extra`
-(integrator data), payment redirect links. Orders erased by an earlier release kept the other fields: `manage.py
-complete-erasures` reports them (rows whose address e-mail is anonymised), `--apply` finishes them, and
-`--marker-domain <domain>` adds the domain an earlier release line anonymised e-mails to, for a database that came
-from one.
+(integrator data), payment redirect links.
+
+#### Orders not fulfilled yet refuse it
+
+While the customer has an order the shop still has to fulfil, the erasure is refused and nothing is anonymised:
+not that order, not the customer's other orders, not the carts. A pinned token looks at its channel's orders only.
+
+| Status | Refuses the erasure | Why |
+|---|---|---|
+| `new`, `unpaid` | yes | waiting for payment; a gateway confirms the payment for days after the order, and the shop then ships it |
+| `confirmed` | yes | paid, not shipped |
+| `holded` | yes | on hold; it goes back to `confirmed` or is cancelled |
+| `in_progress` | yes | being prepared, not handed to the carrier yet |
+| `complete` | no | delivered; the tracking number stays for complaints |
+| `returned`, `canceled` | no | nothing left to ship |
+
+v1 answers 409 with the blocking orders' ids, numbers and statuses, never the e-mail or any other personal value:
+
+```json
+{"meta": {"status": "OPEN_ORDERS", "message": "The customer has orders that are not fulfilled yet; nothing was anonymized", ...},
+ "data": {"deleted": false, "blocking_orders": [{"order_id": "<uuid>", "pretty_id": "0100000042", "status": "confirmed"}]}}
+```
+
+The Python API raises `django_checkout.output.admin.ErasureBlocked` instead; its `orders` holds the same
+`BlockingOrder(order_id, pretty_id, status)` entries. Ship or cancel the orders (an abandoned unpaid order: cancel it in
+the CMS or with `POST /api/checkout/v2/admin/{channel}/orders/{uid}/cancel/`), then repeat the request. One
+gap stays: a cancelled order whose payment still arrives is confirmed again (logged CRITICAL for manual review,
+`notification_state.confirm_order`); erased in between, it has no address left to ship to.
+
+#### Erasure order: checkout first, then the account
+
+Erase in checkout first, then delete the account in `django_accounts` (`accounts.erase`). Send the account e-mail and
+every address e-mail the customer used in checkout: each request finds the orders and carts of the e-mail it names.
+
+The other way round, deleting the account sets `customer` to NULL on the orders, carts and used codes, and checkout
+can no longer find anything through the account. It then finds an order only by the e-mail sent: in the addresses of
+`order_body`, in the `billing_email` / `shipping_email` columns, or in a `UsedCoupon` row, which keeps the account
+e-mail of a logged-in customer's code. An order placed with another address e-mail and no code is reachable only by
+that address e-mail; a cart only by the e-mail in its addresses. Orders and carts with no e-mail of the customer keep
+no personal data once the account is gone.
+
+#### Orders erased before
+
+Orders erased by an earlier release kept the other fields: `manage.py complete-erasures` reports them (rows whose
+address e-mail is anonymised), `--apply` finishes them, and `--marker-domain <domain>` adds the domain an earlier
+release line anonymised e-mails to, for a database that came from one. The command finishes erasures already made,
+so orders not fulfilled yet do not stop it.

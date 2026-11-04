@@ -61,6 +61,11 @@
   Webhook ID of the webhook pointing at `notify/paypal/`) in its `additional_data`. Without it webhook notifications
   are refused (PayPal retries them for about 3 days) and an order is confirmed only when the buyer returns to the
   shop.
+- **Customer erasure:** `DELETE customer/delete` answers 409 `OPEN_ORDERS` (and the Python API raises
+  `django_checkout.output.admin.ErasureBlocked`) while the customer has an order that is not `complete`, `returned`
+  or `canceled`. A caller that erases on request has to ship or cancel those orders first and repeat the request.
+  Erase in checkout before deleting the account in django-accounts: afterwards checkout finds orders only by the
+  e-mails they hold.
 
 ### Fixed
 
@@ -194,6 +199,14 @@
   components allow, as the cart counts a bundle line (the bundle's own Stock row does not decide; with limits, the
   required and default components). For other modules that answer stock, so a bundle they report available is one
   the cart accepts. SKUs that are not bundles are left out.
+
+### Changed
+
+- Customer erasure (client-visible) is refused while the shop still has to fulfil one of the customer's orders: one
+  in `new`, `unpaid`, `confirmed`, `holded` or `in_progress`. Nothing is anonymised then, not the other orders, not
+  the carts; v1 answers 409 `OPEN_ORDERS` with the blocking orders' ids, numbers and statuses (no personal data), and
+  `output.admin.admin_customer_delete` raises `ErasureBlocked`. It anonymised the delivery address of an order still
+  to ship. A pinned erase token looks at its channel's orders only. `complete-erasures` is not affected.
 
 ## 10.0.1 — 2026-10-27
 

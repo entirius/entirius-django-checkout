@@ -24,10 +24,14 @@ from io import StringIO
 import pytest
 from django.core.management import call_command
 from process_logger import ProcessLogger
+from rest_framework.test import APIRequestFactory
 
-from django_checkout.enums import PaymentIntentStatus
+from django_checkout.enums import OrderStatus, PaymentIntentStatus
 from django_checkout.models import Cart, Order, PaymentIntent, UsedCoupon
-from django_checkout.services.customer import CustomerService
+from django_checkout.services.customer import BlockingOrder, CustomerService, ErasureBlocked
+from django_checkout.signals import customer_anonymized_signal
+from django_checkout.views.admin.customer import admin_customer_delete
+from tests.conftest import ERASE_SCOPE
 
 EMAIL = "anna.testowa@example.org"
 ACCOUNT_EMAIL = "anna.konto@example.org"
@@ -78,6 +82,7 @@ def _body(email=EMAIL):
 
 
 def _order(channel, email=EMAIL, **fields):
+    fields.setdefault("order_status", OrderStatus.COMPLETED)  # delivered: nothing refuses its erasure
     return Order.objects.create(
         channel=channel, order_body=_body(email), billing_email=email, shipping_email=email, **fields
     )
@@ -477,10 +482,10 @@ def test_gateway_payload_of_an_unknown_shape_is_dropped():
 # --- The erasure request ----------------------------------------------------------------------------------------
 
 
-def _erase(email):
+def _erase(email, channel=None):
     service = CustomerService()
     service.set_logger(ProcessLogger("TEST", module="django_checkout"))
-    return service.anonymize_customer(email)
+    return service.anonymize_customer(email, channel)
 
 
 def _old_marker_body(marker="xxxxxxxxxxxx@example.com"):
@@ -495,7 +500,11 @@ def _old_marker_body(marker="xxxxxxxxxxxx@example.com"):
 def half_anonymized_order(channel):
     """State the old anonymize() left behind: names and e-mails gone from the body, everything else kept."""
     order = Order.objects.create(
-        channel=channel, order_body=_old_marker_body(), billing_email=EMAIL, shipping_email=EMAIL
+        channel=channel,
+        order_body=_old_marker_body(),
+        billing_email=EMAIL,
+        shipping_email=EMAIL,
+        order_status=OrderStatus.COMPLETED,
     )
     UsedCoupon.objects.create(
         channel=channel, order=order, billing_email=EMAIL, shipping_email=EMAIL, discount_code="WELCOME10"
@@ -551,6 +560,126 @@ def test_erasure_request_leaves_other_customers_alone(channel):
     assert erased.billing_email == ANONYMIZED_EMAIL
 
 
+# --- Orders the shop still has to fulfil refuse the erasure ------------------------------------------------------
+
+OPEN_STATUSES = [
+    OrderStatus.NEW,
+    OrderStatus.UNPAID,
+    OrderStatus.CONFIRMED,
+    OrderStatus.HOLDED,
+    OrderStatus.IN_PROGRESS,
+]
+SETTLED_STATUSES = [OrderStatus.COMPLETED, OrderStatus.RETURNED, OrderStatus.CANCELED]
+
+
+def _untouched(*rows) -> bool:
+    for row in rows:
+        row.refresh_from_db()
+    return all((getattr(row, "order_body", None) or row.cart_body) == _body() for row in rows)
+
+
+@pytest.fixture
+def anonymized_signals():
+    received = []
+
+    def receiver(sender, **kwargs):
+        received.append(kwargs)
+
+    customer_anonymized_signal.connect(receiver)
+    yield received
+    customer_anonymized_signal.disconnect(receiver)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("status", OPEN_STATUSES)
+def test_erasure_is_refused_while_an_order_is_not_fulfilled(channel, status):
+    order = _order(channel, order_status=status)
+    intent = _intent(order, "payu")
+    cart = Cart.objects.create(channel=channel, cart_body=_body())
+
+    with pytest.raises(ErasureBlocked) as refused:
+        _erase(EMAIL)
+
+    assert refused.value.orders == [BlockingOrder(str(order.order_id), order.pretty_id, status)]
+    assert _untouched(order, cart)
+    assert order.billing_email == EMAIL
+    intent.refresh_from_db()
+    assert intent.provider_request == PAYU[0]
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("status", SETTLED_STATUSES)
+def test_erasure_goes_through_once_every_order_is_settled(channel, status):
+    order = _order(channel, order_status=status)
+
+    success, orders_idxs, *_ = _erase(EMAIL)
+
+    assert (success, orders_idxs) == (True, [str(order.order_id)])
+    order.refresh_from_db()
+    assert order.billing_email == ANONYMIZED_EMAIL
+
+
+@pytest.mark.django_db
+def test_one_open_order_keeps_every_order_and_cart_of_the_customer(channel, anonymized_signals):
+    delivered = _order(channel)
+    in_progress = _order(channel, order_status=OrderStatus.IN_PROGRESS)
+    cart = Cart.objects.create(channel=channel, cart_body=_body())
+
+    with pytest.raises(ErasureBlocked) as refused:
+        _erase(EMAIL)
+
+    assert [order.order_id for order in refused.value.orders] == [str(in_progress.order_id)]
+    assert _untouched(delivered, in_progress, cart)
+    assert anonymized_signals == []
+
+
+@pytest.mark.django_db
+def test_a_channel_erasure_looks_only_at_the_orders_of_its_channel(channel, other_channel):
+    own = _order(channel)
+    elsewhere = _order(other_channel, order_status=OrderStatus.CONFIRMED)
+
+    success, orders_idxs, *_ = _erase(EMAIL, channel)
+
+    assert (success, orders_idxs) == (True, [str(own.order_id)])
+    assert _untouched(elsewhere)
+    with pytest.raises(ErasureBlocked):
+        _erase(EMAIL)  # every channel: the confirmed order refuses it
+
+
+@pytest.mark.django_db
+def test_erase_view_answers_409_naming_the_open_orders_and_nothing_personal(channel, make_api_key):
+    order = _order(channel, order_status=OrderStatus.CONFIRMED)
+    key = make_api_key(channel=channel, scope=ERASE_SCOPE)
+    request = APIRequestFactory().delete(
+        "/", data=json.dumps({"email": EMAIL}), content_type="application/json", HTTP_X_API_ADMIN_KEY=key
+    )
+
+    response = admin_customer_delete(request, channel_idx=channel.idx, version="1")
+
+    assert response.status_code == 409
+    body = json.loads(response.content)
+    assert body["meta"]["status"] == "OPEN_ORDERS"
+    assert body["data"] == {
+        "deleted": False,
+        "blocking_orders": [{"order_id": str(order.order_id), "pretty_id": order.pretty_id, "status": "confirmed"}],
+    }
+    assert _leftovers(response.content.decode()) == []
+    assert _untouched(order)
+
+
+@pytest.mark.django_db
+def test_python_api_raises_erasure_blocked(channel):
+    from django_checkout.output.admin import ErasureBlocked as PublicErasureBlocked
+    from django_checkout.output.admin import admin_customer_delete as erase_customer
+
+    order = _order(channel, order_status=OrderStatus.UNPAID)
+
+    with pytest.raises(PublicErasureBlocked):
+        erase_customer(EMAIL, ProcessLogger("TEST", module="django_checkout"))
+
+    assert _untouched(order)
+
+
 # --- Backfill of orders erased before the fix -------------------------------------------------------------------
 
 
@@ -595,3 +724,16 @@ def test_complete_erasures_apply_finishes_the_old_erasures_only(channel, half_an
     assert _leftovers(erased_cart.cart_body) == []
     untouched.refresh_from_db()
     assert untouched.order_body == _body(OTHER_EMAIL)
+
+
+@pytest.mark.django_db
+def test_complete_erasures_is_not_refused_by_an_open_order(channel):
+    """The backfill finishes erasures already made; it never starts one, so open orders do not stop it."""
+    order = Order.objects.create(
+        channel=channel, order_body=_old_marker_body(), billing_email=EMAIL, order_status=OrderStatus.IN_PROGRESS
+    )
+
+    assert "orders 1, carts 0, failed 0" in _complete_erasures("--apply")
+
+    order.refresh_from_db()
+    assert order.billing_email == ANONYMIZED_EMAIL
