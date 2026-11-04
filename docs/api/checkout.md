@@ -2006,12 +2006,12 @@ order an earlier one left half done. Every match is the whole address, case asid
 | `order_body` / `cart_body` | `comment`, `customer_ip`, gift-card personalisation, payment credentials (`***REDACTED***`, masked voucher codes stay) | totals, items, codes, shipping method and pickup point, `affiliate_code` |
 | `Order` | `billing_email`, `shipping_email` | status, numbers, `customer` (the account erasure in `django_accounts` sets it to NULL) |
 | `UsedCoupon` | `billing_email`, `shipping_email` | the code and the order (`max_uses_per_user` no longer ties the use to the erased e-mail) |
-| `PaymentIntent` | `provider_request`, `provider_notify`: everything except ids, amounts, currencies, statuses and timestamps | `amount`, `currency`, `external_order_id`, `payment_status`, `code`, `redirect_url` |
+| `PaymentIntent` | `provider_request`, `provider_notify`: everything except ids, amounts, currencies, statuses and timestamps; `redirect_url` (`***REDACTED***`: the gateway's payment page or, for BLIK, a copy of the body's `continue_url`; only the order's creation answer hands it out) | `amount`, `currency`, `external_order_id`, `payment_status`, `code` |
 | `PaymentRedirect` | `target_url` (`***REDACTED***`: a copy of the body's `continue_url`) | token, expiry, consumption time |
 
 Names and free text become `x` of the same length, e-mails `x…x@example.com`. Not touched: invoices
 (`Invoice.invoice_base64`, kept for accounting), order attachments, shipping tracking numbers, `Order.extra`
-(integrator data), the gateway's own payment link (`PaymentIntent.redirect_url`).
+(integrator data).
 
 #### Orders not fulfilled yet refuse it
 

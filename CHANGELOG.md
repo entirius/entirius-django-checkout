@@ -77,8 +77,10 @@
   payments (`PaymentIntent.provider_request` / `provider_notify`: buyer, payer, shipping address), which keep only
   ids, amounts, currencies, statuses and timestamps. The intent's columns (amount, currency, external id, status)
   stay. The payment redirect bridge's target (`PaymentRedirect.target_url`, a copy of the `continue_url` the body
-  already redacted) becomes `***REDACTED***`, so a link still open answers 404. The request also finds orders by those e-mail columns and by the e-mail a used code stored (the account
-  e-mail of a deleted account), so repeating it completes an order an earlier erasure left half done. New command
+  already redacted) becomes `***REDACTED***`, so a link still open answers 404. The payment's own link is redacted
+  too (`PaymentIntent.redirect_url`: the gateway's payment page or, for BLIK, the same `continue_url` copy).
+  The request also finds orders by those e-mail columns and by the e-mail a used code stored (the account e-mail of
+  a deleted account), so repeating it completes an order an earlier erasure left half done. New command
   `complete-erasures` finishes the orders and carts erased before this release (dry run unless `--apply`).
 - Customer erasure no longer anonymises another customer whose e-mail contains the erased one: `order_body` and
   `cart_body` were searched for the e-mail as a substring, so erasing `anna@example.org` also anonymised the orders

@@ -477,6 +477,29 @@ def test_anonymize_redacts_the_payment_redirect_target(channel):
 
 
 @pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("code", "link"),
+    [
+        ("payu_blik", f"https://shop.example.com/thanks/25-000001?email={EMAIL}"),  # BLIK: the continue_url copy
+        ("payu", "https://secure.snd.payu.com/pay/?orderId=PAYU-EXT-1&token=synthetic"),  # the gateway's page
+    ],
+    ids=["blik-continue-url", "gateway-page"],
+)
+def test_anonymize_redacts_the_payment_link_and_keeps_the_accounting_columns(channel, code, link):
+    """Only the order's creation answer hands the link out; accounting reads external_order_id, not the link."""
+    order = _order(channel)
+    intent = PaymentIntent.objects.create(
+        order=order, code=code, amount="123.00", currency="PLN", external_order_id="EXT-1", redirect_url=link
+    )
+
+    order.anonymize()
+
+    intent.refresh_from_db()
+    assert intent.redirect_url == "***REDACTED***"
+    assert (str(intent.amount), intent.currency, intent.external_order_id) == ("123.00", "PLN", "EXT-1")
+
+
+@pytest.mark.django_db
 def test_a_redacted_payment_redirect_answers_404(channel, monkeypatch):
     """A bridge link still open after the erasure leads nowhere instead of to the old target."""
     from django_checkout import settings as checkout_settings
