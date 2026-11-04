@@ -10,6 +10,9 @@ stored with the payment method as v1 stores it, is never returned, and must be a
 (``resolve_continue_url``): a direct scheme, or a target the payment bridge may redirect to.
 """
 
+from types import SimpleNamespace
+from unittest.mock import patch
+
 import pytest
 from django.urls import include, path
 from drf_spectacular.generators import SchemaGenerator
@@ -150,6 +153,67 @@ class TestTheTargetIsChecked:
 
         assert response.status_code == 200
         assert _stored_entry(cart_with_address)["continue_url"] == "myapp://paid"
+
+
+@pytest.mark.django_db
+@pytest.mark.usefixtures("stripe")
+class TestTheValueStored:
+    def test_surrounding_spaces_are_not_sent_to_the_gateway(self, api_key, channel, cart_with_address):
+        _patch_payment(api_key, channel, cart_with_address, {"code": "stripe", "continue_url": f"  {RETURN_URL} "})
+
+        assert _stored_entry(cart_with_address)["continue_url"] == RETURN_URL
+
+    def test_an_empty_one_is_no_return_url(self, api_key, channel, cart_with_address):
+        response = _patch_payment(api_key, channel, cart_with_address, {"code": "stripe", "continue_url": ""})
+
+        assert response.status_code == 200
+        assert _stored_entry(cart_with_address)["continue_url"] is None
+
+    def test_it_is_bounded(self, api_key, channel, cart_with_address):
+        url = "https://shop.example.org/" + "a" * 2048
+
+        response = _patch_payment(api_key, channel, cart_with_address, {"code": "stripe", "continue_url": url})
+
+        assert response.status_code == 400
+
+
+def _payment_step_accepts(url) -> bool:
+    """What ``resolve_continue_url`` decides at the order, without an order or a bridge row."""
+    provider = BasePaymentProvider(SimpleNamespace(channel=SimpleNamespace(idx="test-channel")))
+    provider.request = SimpleNamespace(build_absolute_uri=lambda path: path)
+    with (
+        patch("django_checkout.models.PaymentRedirect"),
+        patch("django_checkout.domain.payment_provider.base_payment_provider.reverse", return_value="/bridge/"),
+    ):
+        try:
+            provider.resolve_continue_url(url, order=None)
+        except ValueError:
+            return False
+    return True
+
+
+@pytest.mark.parametrize(
+    ("direct", "schemes", "hosts"),
+    [(["https"], ["https"], []), ([], ["https"], ["shop.example.org"]), (["https"], ["https", "myapp"], [])],
+)
+@pytest.mark.parametrize(
+    "url",
+    [
+        RETURN_URL,
+        "https://evil.example.com/",
+        "https://evil.example.com\\@shop.example.org/",
+        "http://shop.example.org/",
+        "myapp://paid",
+        "javascript:alert(1)",
+        "//shop.example.org/",
+    ],
+)
+def test_the_patch_accepts_what_the_payment_step_accepts(bridge, direct, schemes, hosts, url):
+    from django_checkout.domain.payment_redirect_target import is_allowed_continue_url
+
+    bridge(direct=direct, schemes=schemes, hosts=hosts)
+
+    assert is_allowed_continue_url(url) is _payment_step_accepts(url)
 
 
 def test_the_openapi_request_carries_it():

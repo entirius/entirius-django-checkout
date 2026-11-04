@@ -1934,8 +1934,9 @@ v2 price fields use explicit gross/net naming (aligned with Matrix v2).
 ### v2 payment return URL
 
 `PATCH carts/{id}/payment/` takes an optional `continue_url`: where the gateway sends the customer back after
-paying, `<order_id>` replaced by the order number (`https://shop.example.org/checkout/success?ref=<order_id>`). It is
-stored with the payment method as v1's `payment_method.continue_url` is, and never returned. PayU (`payu`,
+paying, `<order_id>` replaced by the order number (`https://shop.example.org/checkout/success?ref=<order_id>`), at
+most 2048 characters; surrounding spaces are dropped and an empty one means none. It is stored with the payment
+method as v1's `payment_method.continue_url` is, and never returned. PayU (`payu`,
 `payu_card`, `payu_blik`) and Stripe hosted checkout read it; Stripe opens no session without one. Przelewy24,
 PayPal and Paynow return to the URLs in the method's `additional_data`.
 

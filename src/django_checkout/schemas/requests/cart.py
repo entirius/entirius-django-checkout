@@ -138,6 +138,7 @@ class PaymentPatchRequest(BaseModel):
     )
     continue_url: str | None = Field(
         None,
+        max_length=2048,
         description=(
             "Where the payment gateway sends the customer back after paying; `<order_id>` is replaced by the order "
             "number. A scheme in `PAYMENT_REDIRECT_DIRECT_SCHEMES` goes to the gateway as it is, any other target "
@@ -150,8 +151,14 @@ class PaymentPatchRequest(BaseModel):
     @field_validator("continue_url")
     @classmethod
     def _allowed_return_target(cls, value: str | None) -> str | None:
-        """The gateway call refuses any other target; refusing it here tells the client before the order."""
-        if value is not None and not is_allowed_continue_url(value):
+        """The gateway call refuses any other target; refusing it here tells the client before the order.
+
+        Stored as checked: the gateway gets the URL as stored, and an empty one is no URL (as the gateway call reads it).
+        """
+        value = value.strip() if value else value
+        if not value:
+            return None
+        if not is_allowed_continue_url(value):
             raise ValueError("continue_url target is not allowed")
         return value
 

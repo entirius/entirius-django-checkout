@@ -79,12 +79,12 @@
 ### Fixed
 
 - v2 `PATCH carts/{id}/payment/` takes an optional `continue_url` (additive), where the gateway sends the customer
-  back after paying, `<order_id>` replaced by the order number. The service wrote no return URL for a v2 cart: PayU
-  (`payu`, `payu_card`, `payu_blik`) got no `continueUrl` and Stripe no `success_url`, so Stripe refused to open the
-  session. It is stored with the payment method as v1 stores it and never returned. A target the payment step
-  refuses is answered 400 (`field: "continue_url"`) instead of failing the payment after the order: a scheme in
-  `PAYMENT_REDIRECT_DIRECT_SCHEMES`, or a bridge target (`PAYMENT_REDIRECT_BRIDGE_TARGET_SCHEMES`,
-  `PAYMENT_REDIRECT_ALLOWED_HOSTS` for http/https).
+  back after paying, `<order_id>` replaced by the order number, at most 2048 characters. The service wrote no return
+  URL for a v2 cart: PayU (`payu`, `payu_card`, `payu_blik`) got no `continueUrl` and Stripe no `success_url`, so
+  Stripe refused to open the session. It is stored with the payment method as v1 stores it and never returned. A
+  target the payment step refuses is answered 400 (`field: "continue_url"`) instead of failing the payment after
+  the order: a scheme in `PAYMENT_REDIRECT_DIRECT_SCHEMES`, or a bridge target
+  (`PAYMENT_REDIRECT_BRIDGE_TARGET_SCHEMES`, `PAYMENT_REDIRECT_ALLOWED_HOSTS` for http/https).
 - Stripe: a line of several units with a cart discount is charged its discounted total. Its `unit_amount` was the
   unit price less the discount of the whole line, and Stripe multiplies `unit_amount` by the quantity: 3 x 54.99 at
   15 % off charged 90.72 instead of 140.22, and a large discount sent a negative amount Stripe refused. Lines carry
