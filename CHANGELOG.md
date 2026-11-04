@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- `import-discount-rules` (and the CSV import in the Django admin) no longer hangs. The mode-of-action loop of a
+  row never ended once the row ran out of modes (`is_inclusion_or_exclusion_<n>` empty or missing), so the import
+  never reached the row's codes or the next row; the admin import held the request until it timed out.
+
 ## 10.0.1 — 2026-10-27
 
 ### Added

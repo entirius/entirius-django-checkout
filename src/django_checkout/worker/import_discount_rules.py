@@ -73,7 +73,7 @@ def creating_in_db_for_each_line(data):
             while is_more_modes_of_action:
                 try:
                     if not row.get(f"is_inclusion_or_exclusion_{n}", None):
-                        continue
+                        break  # the row has no more modes of action
 
                     mode_of_action = DiscountModeOfAction(
                         rule=rule,
