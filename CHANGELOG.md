@@ -93,7 +93,7 @@
   orders are found by the account, the e-mail columns, the billing and shipping address e-mails and the used codes
   (the whole address, case-insensitive); carts by the account and the address e-mails. In another customer's order
   or cart the erased e-mail is replaced wherever a string holds it (gift card recipient, comment) and nothing else
-  changes; such an order still to fulfil refuses the erasure.
+  changes, under a row lock; such an order never refuses the erasure. The account e-mail matches case aside.
 - Log lines and BI events no longer carry a customer's personal data. The admin order preview (v2
   `GET admin/{channel}/orders/{uid}/`) logged the billing e-mail and now logs the order id; the PayU, PayPal and
   Stripe notification views logged and sent to BI the whole notification (buyer, payer, `customer_details`) and now

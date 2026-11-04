@@ -156,7 +156,7 @@ toggles and defaults: `docs/configuration.md`.
   the account in `django_accounts`; the other way round orders are found only by the e-mails they hold. The
   customer's rows are found by fixed fields (account, e-mail columns, address e-mails, used codes), never by a body
   search: another customer's row that holds the e-mail elsewhere only gets that e-mail replaced
-  (`utils.anonymize_email_in_body`).
+  (`utils.anonymize_email_in_body`, on a locked fresh row), and it never refuses the erasure.
 - A discount code is unique per (channel, currency), a rule without currencies covering every currency
   (`services/code_clashes.py`, `docs/api/discounts.md`). Every write path (v2 admin service, Django admin forms,
   `import-discount-rules`) calls `refuse_clash` / `refuse_scope_change`; a new one must too. No DB constraint

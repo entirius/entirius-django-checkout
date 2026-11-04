@@ -180,8 +180,12 @@ def anonymize_addresses_in_body(body: dict) -> bool:
 
 
 def _email_pattern(email: str) -> re.Pattern:
-    """``email`` as a whole address, case aside: not the tail of a longer one (``jo`` + it) nor its head (``.uk``)."""
-    return re.compile(rf"(?<![\w.!#$%&'*+/=?^`{{|}}~-]){re.escape(email)}(?![\w-]|\.[\w-])", re.IGNORECASE)
+    """``email`` as a whole address, case aside: not the tail of a longer one (``jo`` + it) nor its head (``.uk``).
+
+    Quotes, ``=``, ``/`` or ``?`` before it end a word (``'b@x.com'``, ``?email=b@x.com``); a letter, digit, ``.``,
+    ``+``, ``%``, ``_`` or ``-`` would continue the local part of another address.
+    """
+    return re.compile(rf"(?<![\w.%+-]){re.escape(email)}(?![\w-]|\.[\w-])", re.IGNORECASE)
 
 
 def _replace_in_strings(node, pattern: re.Pattern, marker: str) -> bool:
