@@ -12,11 +12,11 @@ from przelewy24_sdk.dto.payment import Cart as Przelewy24Cart
 from przelewy24_sdk.dto.payment import TransactionRequest as Przelewy24Transaction
 from przelewy24_sdk.dto.payment import VerifyRequest as Przelewy24Verify
 from przelewy24_sdk.services.client import Przelewy24
-from przelewy24_sdk.settings import CRC_KEY
 from przelewy24_sdk.utils.sign import calculate_sign, calculate_verify_sign
 
 from django_checkout import settings
 from django_checkout.domain.payment_provider.base_payment_provider import BasePaymentProvider
+from django_checkout.domain.payment_provider.przelewy24_notification import crc_key_for
 from django_checkout.enums import PaymentIntentStatus
 from django_checkout.utils import sanitize
 
@@ -80,7 +80,7 @@ class Przelewy24PaymentProvider(BasePaymentProvider, ProcessLoggerMixin):
             sandbox=self._sandbox_setting(self.payment_method),
         )
 
-        crc_key = self.payment_method.additional_data.get("crc_key", CRC_KEY)
+        crc_key = crc_key_for(self.payment_method)
 
         # Odczytanie odpowiedzi
         verify_request = self.build_verify_data(response_body, crc_key)
@@ -140,7 +140,7 @@ class Przelewy24PaymentProvider(BasePaymentProvider, ProcessLoggerMixin):
             if self.payment_method.additional_data["regulation_accept"]
             else False
         )
-        crc_key = self.payment_method.additional_data.get("crc_key", CRC_KEY)
+        crc_key = crc_key_for(self.payment_method)
         session_id = str(order.order_id)
         sign = calculate_sign(
             session_id=session_id, merchant_id=pos_merchant_id, amount=amount, currency=currency, crc_key=crc_key
