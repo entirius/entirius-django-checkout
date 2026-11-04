@@ -2,8 +2,25 @@
 
 ## Unreleased
 
+### Added
+
+- A discount code is unique per (channel, currency): two rules that share a channel and a currency (a rule
+  without currencies holds every currency) may not hold the same code. The same code on rules of other channels
+  or of other currencies stays allowed (`GRATIS_STEP` on an EUR and a PLN rule). Admin API v2 (client-visible
+  addition): creating or renaming a clashing code, a rule created with one, or new `channels` / `currencies` that
+  make a rule's code clash with a row it did not clash with before answer 400 `VALIDATION_ERROR` with the detail
+  on `code`, `codes.<i>.code`, `currencies` or `channels` and issue `UNIQUE`; nothing is written. The Django admin
+  (code page, the rule's codes inline) refuses the same, and `import-discount-rules` skips a clashing code (and a
+  row whose new channels clash) with a warning. Clashes stored before keep working, and an edit that does not
+  touch them goes through. No migration and no database constraint: the new configuration check
+  `checkout.discount_codes` (`manage.py check --database default --tag checkout.discount_codes`, and the CMS
+  through django-munin) lists the stored ones per channel. Reference: `docs/api/discounts.md`.
+
 ### Fixed
 
+- `import-discount-rules` (and the CSV import in the Django admin) no longer hangs. The mode-of-action loop of a
+  row never ended once the row ran out of modes (`is_inclusion_or_exclusion_<n>` empty or missing), so the import
+  never reached the row's codes or the next row; the admin import held the request until it timed out.
 - An order is refused when a valid item is priced 0 (`UNPROCESSABLE_ENTITY sku: <sku>`, v1 403). `OrderValidation`
   compared `str(total_price) == 0`, a string against an int, so the check never fired and such an item went into
   the order. A gift still passes at 0 (`GRATIS_MECHANISM = 2`, `GRATIS_PRICE = 0`), and an item that is not valid
@@ -29,8 +46,6 @@
   code on an EUR and a PLN rule (`GRATIS_STEP` in the test package) took the PLN rule on an EUR cart and offered no
   gift. A code whose rules all leave out the cart currency is rejected as `currency_not_supported` (v2
   `DISCOUNT_CURRENCY_NOT_SUPPORTED`, meta `currency`); v1 lists it under `one_or_more_discount_invalid`.
-### Added
-
 - `django_checkout.output.quantities.get_bundle_quantities(skus, channel_idx)`: how many of each bundle its
   components allow, as the cart counts a bundle line (the bundle's own Stock row does not decide; with limits, the
   required and default components). For other modules that answer stock, so a bundle they report available is one
