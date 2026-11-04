@@ -31,15 +31,12 @@ def stripe_notify(request: WSGIRequest, channel_idx: str = None, *args, **kwargs
     bev = Checkout_StripeNotifyEvent(is_ongoing_event=True)
 
     try:
-        endpoint_secret = None
         pm = PaymentMethod.objects.filter(channel__idx=channel_idx, provider=PaymentProvider.STRIPE).first()
-        if pm and pm.additional_data:
-            if "api_key" in pm.additional_data:
-                stripe.api_key = pm.additional_data["api_key"]
-            if "endpoint_secret" in pm.additional_data:
-                endpoint_secret = pm.additional_data["endpoint_secret"]
+        endpoint_secret = ((pm.additional_data if pm else None) or {}).get("endpoint_secret")
 
-        if not stripe.api_key and not endpoint_secret:
+        # Only the channel's own endpoint secret verifies an event; an empty one is no secret. The view
+        # makes no Stripe API call, so it leaves the process-wide stripe.api_key alone.
+        if not endpoint_secret:
             bev.finish_with_error(finish_tag="No api_key and endpoint_secret data in PaymentMethod Stripe")
             return Response(data={"message": "For more information see log"}, status="FAIL", status_code=400)
 
@@ -48,7 +45,7 @@ def stripe_notify(request: WSGIRequest, channel_idx: str = None, *args, **kwargs
         bev.finish_with_error(finish_tag="Stripe response error, body not in json format", error_message=str(e))
         return Response(data={"message": "For more information see log"}, status="FAIL", status_code=400)
 
-    sig_header = request.META["HTTP_STRIPE_SIGNATURE"]
+    sig_header = request.META.get("HTTP_STRIPE_SIGNATURE", "")
     try:
         event = stripe.Webhook.construct_event(request.body, sig_header, endpoint_secret)
     except ValueError as e:

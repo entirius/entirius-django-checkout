@@ -19,6 +19,10 @@
 - Paynow: notifications go through the same rules: a late or repeated status no longer pulls a COMPLETE payment
   back, re-confirms an order that moved on, or cancels an order confirmed by hand. BI finish tags keep their wording.
 
+- Stripe: `notify/stripe/` verifies an event only with a non-empty `endpoint_secret` of the channel's Stripe
+  payment method; without one the event is answered 400. The view no longer sets the process-wide
+  `stripe.api_key`, and a request without a `Stripe-Signature` header is answered 400 instead of 500.
+
 ### Upgrade notes
 
 - **PayPal:** every PayPal payment method needs `webhook_id` (PayPal developer dashboard: the REST app, Webhooks,

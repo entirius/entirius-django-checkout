@@ -4,6 +4,9 @@
 
 """Stripe checkout session events: which ones may change a payment, and how far.
 
+An event is verified with the endpoint secret of the channel in the URL; without a non-empty
+secret nothing is verified, so nothing passes.
+
 Events are signed the way Stripe signs them (``t=...,v1=HMAC-SHA256``) and go through the real
 ``stripe.Webhook.construct_event``; nothing leaves the test.
 """
@@ -106,3 +109,52 @@ def test_expired_session_cancels_the_payment_and_stores_the_session(channel, cus
         "object": "checkout.session",
         "payment_status": "unpaid",
     }
+
+
+# --- The endpoint secret -----------------------------------------------------------------
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("additional_data", [{"endpoint_secret": ""}, {"endpoint_secret": None}])
+def test_method_without_an_endpoint_secret_rejects(channel, customer, additional_data):
+    payment_intent = _intent(channel, customer, _stripe_method(channel, **additional_data))
+
+    response = _notify(channel, secret="")
+
+    assert response.status_code == 400
+    assert _state(payment_intent) == UNTOUCHED
+
+
+@pytest.mark.django_db
+def test_a_global_api_key_does_not_stand_in_for_the_secret(channel, customer, monkeypatch):
+    """``stripe.api_key`` is set by whichever request ran before; it verifies nothing."""
+    monkeypatch.setattr(stripe, "api_key", "synthetic-key-from-an-earlier-request")
+    method = _stripe_method(channel)
+    method.additional_data = {"api_key": "synthetic-api-key"}
+    method.save()
+    payment_intent = _intent(channel, customer, method)
+
+    response = _notify(channel, secret="")
+
+    assert response.status_code == 400
+    assert _state(payment_intent) == UNTOUCHED
+
+
+@pytest.mark.django_db
+def test_notification_leaves_the_global_api_key_alone(channel, customer, stripe_method):
+    _intent(channel, customer, stripe_method)
+
+    _notify(channel)
+
+    assert stripe.api_key is None
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("header", ["", "t=1,v1=0000"], ids=["missing", "wrong"])
+def test_event_without_a_valid_signature_is_rejected(channel, customer, stripe_method, header):
+    payment_intent = _intent(channel, customer, stripe_method)
+
+    response = _notify(channel, header=header)
+
+    assert response.status_code == 400
+    assert _state(payment_intent) == UNTOUCHED
