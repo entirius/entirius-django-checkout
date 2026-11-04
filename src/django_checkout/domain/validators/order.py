@@ -22,7 +22,8 @@ class OrderValidation:
                 status = f"OUT_OF_STOCK sku: {i.sku}"
                 message = f"Not enought quantity for SKU {i.sku}"
 
-            if str(i.total_price) == 0:
+            # A gift may be free (GRATIS_PRICE 0); an item that is not valid carries 0 from invalid_factory.
+            if str(i.status) == "valid" and not getattr(i, "is_gratis", False) and i.total_price == 0:
                 flag = True
                 status = f"UNPROCESSABLE_ENTITY sku: {i.sku}"
                 message = f"Price is 0 for SKU {i.sku}"

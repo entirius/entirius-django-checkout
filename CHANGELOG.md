@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- An order is refused when a valid item is priced 0 (`UNPROCESSABLE_ENTITY sku: <sku>`, v1 403). `OrderValidation`
+  compared `str(total_price) == 0`, a string against an int, so the check never fired and such an item went into
+  the order. A gift still passes at 0 (`GRATIS_MECHANISM = 2`, `GRATIS_PRICE = 0`), and an item that is not valid
+  keeps its own reason (`OUT_OF_STOCK`), not the 0 that `invalid_factory` gives it.
 - A v1 order with a code that sits on more than one rule (one code on an EUR and a PLN rule, as `GRATIS_STEP` in
   the test package, or the same code in another channel) no longer fails after the order is saved. `use_discounts`
   looked the code up by its text alone and raised `MultipleObjectsReturned`, so the customer got 403
