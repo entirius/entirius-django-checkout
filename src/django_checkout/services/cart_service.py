@@ -426,6 +426,7 @@ def patch_payment(
     card: str | None = None,
     save_card: bool = False,
     pay_code: str | None = None,
+    continue_url: str | None = None,
     customer=None,
     geo_country: str | None = None,
 ) -> tuple[Cart, list]:
@@ -440,7 +441,7 @@ def patch_payment(
         bank_id=bank_id,
         country_code=None,
         authorization_token=None,
-        continue_url=None,
+        continue_url=continue_url,
         save_card=save_card,
         pay_code=pay_code,
     )

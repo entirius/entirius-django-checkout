@@ -4,6 +4,11 @@
 
 ### Security
 
+- The payment bridge refuses a web target with a backslash in its host part (`https://evil.example\@shop.example/`):
+  the host check read `shop.example` there, while a browser reads the backslash as `/` and opens `evil.example`.
+  Only deployments that send web return URLs through the bridge (`https` left out of
+  `PAYMENT_REDIRECT_DIRECT_SCHEMES`) were open to it.
+
 - A `free_order` payment method settles only a cart with nothing left to pay (after vouchers and fees). With an
   amount due the cart is invalid with `free_order_amount_due` (v2 `FREE_ORDER_AMOUNT_DUE`, client-visible
   addition), the payment method list no longer offers `free_order`, and `Order.create` refuses on its own. Customer
@@ -63,7 +68,8 @@
   shop.
 - **Customer erasure:** `DELETE customer/delete` answers 409 `OPEN_ORDERS` (and the Python API raises
   `django_checkout.output.admin.ErasureBlocked`) while the customer has an order that is not `complete`, `returned`
-  or `canceled`. A caller that erases on request has to ship or cancel those orders first and repeat the request.
+  or `canceled`. A caller that erases on request has to cancel or finish those orders first and repeat the request;
+  nothing cancels an abandoned unpaid order by itself.
   Erase in checkout before deleting the account in django-accounts: afterwards checkout finds orders only by the
   e-mails they hold.
 - **Gateway payloads:** after the deploy run `manage.py scrub-gateway-payloads` (dry run, counts only), then
@@ -79,12 +85,18 @@
   payments (`PaymentIntent.provider_request` / `provider_notify`: buyer, payer, shipping address), which keep only
   ids, amounts, currencies, statuses and timestamps. The intent's columns (amount, currency, external id, status)
   stay. The payment redirect bridge's target (`PaymentRedirect.target_url`, a copy of the `continue_url` the body
-  already redacted) becomes `***REDACTED***`, so a link still open answers 404. The request also finds orders by those e-mail columns and by the e-mail a used code stored (the account
-  e-mail of a deleted account), so repeating it completes an order an earlier erasure left half done. New command
+  already redacted) becomes `***REDACTED***`, so a link still open answers 404. The payment's own link is redacted
+  too (`PaymentIntent.redirect_url`: the gateway's payment page or, for BLIK, the same `continue_url` copy).
+  The request also finds orders by those e-mail columns and by the e-mail a used code stored (the account e-mail of
+  a deleted account), so repeating it completes an order an earlier erasure left half done. New command
   `complete-erasures` finishes the orders and carts erased before this release (dry run unless `--apply`).
-- Customer erasure no longer anonymises another customer whose e-mail contains the erased one: `order_body` and
-  `cart_body` were searched for the e-mail as a substring, so erasing `anna@example.org` also anonymised the orders
-  and carts of `joanna@example.org`. The bodies now match the whole address (case-insensitive), as the columns do.
+- Customer erasure no longer anonymises another customer's order or cart. `order_body` and `cart_body` were
+  searched for the e-mail as a substring, so erasing `anna@example.org` anonymised every order and cart of
+  `joanna@example.org`, and erasing a gift card's recipient anonymised the buyer's whole order. The customer's own
+  orders are found by the account, the e-mail columns, the billing and shipping address e-mails and the used codes
+  (the whole address, case-insensitive); carts by the account and the address e-mails. In another customer's order
+  or cart the erased e-mail is replaced wherever a string holds it (gift card recipient, comment) and nothing else
+  changes; such an order still to fulfil refuses the erasure.
 - Autopay: an order paid with Autopay is created again. `process_payment` stored the request DTO itself in
   `provider_request`, which a JSON field cannot hold, so saving the payment raised `TypeError` and the order rolled
   back. It stores the DTO's dict (through the allowlist).
@@ -94,6 +106,32 @@
   keep only what `scrub_gateway_payload` keeps (ids, amounts, statuses), a body that is no JSON not at all; the
   Autopay ITN view no longer logs its XML (`customerData` is the buyer); a failed v1 order logs the customer's pk, not
   `str(customer)` (the username, which is the e-mail); Paynow's invalid-phone line no longer names the number.
+- The cart charges the payment fee and the cash on delivery surcharge of the method that pays what the vouchers
+  leave, not of entry `[0]` of `payment_method` (client-visible: totals change). `[voucher, cod]` dropped both: with
+  a 23.00 voucher on 123.00, courier 10.00 + 5.00 cash on delivery and a 2.00 fee the cart asked 110.00 instead of
+  117.00, and `Order.create` already confirmed it as cash on delivery. A gateway's fee is charged in either order;
+  when the vouchers cover the whole cart no method settles anything, the cart drops the gateway and charges no fee
+  (`[payu, voucher]` asked 2.00 at PayU for the fee alone). The v2 cart's `payment_method` is that method too, with
+  its fee and `is_cash_on_delivery`; a cart with one method shows the same as before.
+- A cart is `valid` only with every `payment_method` entry valid, and product limits set for a shipping and payment
+  method pair apply to each of the cart's methods (client-visible). Both read entry `[0]` only: `[payu, voucher]`
+  with a voucher code refused as malformed stayed valid (`[voucher, payu]` did not), and a product limited for
+  courier with cash on delivery went through as `[voucher, cod]`.
+- v2 `PATCH carts/{id}/payment/` takes an optional `continue_url` (additive), where the gateway sends the customer
+  back after paying, `<order_id>` replaced by the order number, at most 2048 characters. The service wrote no return
+  URL for a v2 cart: PayU (`payu`, `payu_card`, `payu_blik`) got no `continueUrl` and Stripe no `success_url`, so
+  Stripe refused to open the session. It is stored with the payment method as v1 stores it and never returned. A
+  target the payment step refuses is answered 400 (`field: "continue_url"`) instead of failing the payment after
+  the order: a scheme in `PAYMENT_REDIRECT_DIRECT_SCHEMES`, or a bridge target
+  (`PAYMENT_REDIRECT_BRIDGE_TARGET_SCHEMES`, `PAYMENT_REDIRECT_ALLOWED_HOSTS` for http/https).
+- A voucher larger than what the cart has left is debited only by what it takes off (client-visible:
+  `voucher_amount_applied` and the voucher's payment intent drop, the gift card keeps the rest). With a 200.00 gift
+  card on a 123.00 item and a 10 % code the cart took 110.70 off and the card lost 123.00: the voucher module was
+  handed each line at its price before discounts and debited that. When the order is created,
+  `compute_cart_voucher_total_signal` now gets what each line costs after its discount; while the cart is edited it
+  still gets the line totals, so a code added and removed leaves the voucher's cover alone.
+  `voucher_amount_applied` is never more than the total it reduced (PayPal's `discount` and the voucher's payment
+  intent read it; a cart below `min_order_price` no longer counts a voucher's surplus towards it).
 - Stripe: a line of several units with a cart discount is charged its discounted total. Its `unit_amount` was the
   unit price less the discount of the whole line, and Stripe multiplies `unit_amount` by the quantity: 3 x 54.99 at
   15 % off charged 90.72 instead of 140.22, and a large discount sent a negative amount Stripe refused. Lines carry

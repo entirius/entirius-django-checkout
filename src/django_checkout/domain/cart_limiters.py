@@ -23,11 +23,19 @@ if TYPE_CHECKING:
 
 
 def get_product_available(
-    sku_list: list[str], shipping_method: "ShippingMethod", payment_method, channel: "Channel", customer
-) -> tuple[list[str], bool]:
-    products_available, allowed_guest_checkout = LimitedProducts.objects.filter_products_by_limitation(
-        sku_list, shipping_method, payment_method, channel, True if customer else False
-    )
+    sku_list: list[str], shipping_method: "ShippingMethod", payment_methods: list, channel: "Channel", customer
+) -> tuple[set[str], bool]:
+    """The SKUs no limit takes out for the shipping method and each of the cart's payment methods, and whether a guest
+    may buy them. A voucher pays next to another method, so the limits of every method apply, not only entry [0]'s.
+    """
+    products_available = None
+    allowed_guest_checkout = True
+    for payment_method in {method.pk: method for method in payment_methods or []}.values() or [None]:
+        products, allowed = LimitedProducts.objects.filter_products_by_limitation(
+            sku_list, shipping_method, payment_method, channel, True if customer else False
+        )
+        products_available = set(products) if products_available is None else products_available & set(products)
+        allowed_guest_checkout = allowed_guest_checkout and allowed
     return products_available, allowed_guest_checkout
 
 

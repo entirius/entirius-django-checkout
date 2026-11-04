@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from django.db import models
 
 from django_checkout.enums import PaymentIntentStatus
+from django_checkout.utils import REDACTED
 from django_checkout.utils.gateway_payload import scrub_gateway_payload
 
 if TYPE_CHECKING:
@@ -49,13 +50,21 @@ class PaymentIntent(models.Model):
         super().save(*args, **kwargs)
 
     def anonymize(self) -> bool:
-        """Reduce payloads stored before ``save()`` scrubbed them; True if one held something the allowlist drops.
+        """Reduce payloads stored before ``save()`` scrubbed them and redact the payment link; True if either changed.
 
-        The columns (amount, currency, external_order_id, payment_status, code) stay: accounting needs them.
+        The link is the gateway's payment page or, for BLIK, a copy of the body's
+        ``continue_url`` (redacted with the body); only the order's creation answer hands it out. The columns
+        (amount, currency, external_order_id, payment_status, code) stay: accounting needs them.
         """
-        if all(scrub_gateway_payload(getattr(self, name)) == getattr(self, name) for name in PAYLOAD_FIELDS):
+        holds_link = bool(self.redirect_url) and self.redirect_url != REDACTED
+        payloads_drop = any(
+            scrub_gateway_payload(getattr(self, name)) != getattr(self, name) for name in PAYLOAD_FIELDS
+        )
+        if not (holds_link or payloads_drop):
             return False
-        self.save(update_fields=list(PAYLOAD_FIELDS))  # save() scrubs them
+        if holds_link:
+            self.redirect_url = REDACTED
+        self.save(update_fields=[*PAYLOAD_FIELDS, "redirect_url"])  # save() scrubs the payloads
         return True
 
 

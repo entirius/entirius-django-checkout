@@ -20,7 +20,10 @@ logger = ProcessLogger("CHECKOUT_ADMIN_VIEW", module="django_checkout")
 
 
 class OpenOrders(APIException):
-    message = "The customer has orders that are not fulfilled yet; nothing was anonymized"
+    message = (
+        "The customer has orders that are not fulfilled yet; nothing was anonymized. "
+        "Cancel or finish the listed orders, then erase again"
+    )
     status = "OPEN_ORDERS"
     status_code = 409
 

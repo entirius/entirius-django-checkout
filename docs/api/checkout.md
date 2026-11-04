@@ -1931,6 +1931,21 @@ Sub-resource PATCH pattern. Each PATCH sends one concern, returns full cart.
 
 v2 price fields use explicit gross/net naming (aligned with Matrix v2).
 
+### v2 payment return URL
+
+`PATCH carts/{id}/payment/` takes an optional `continue_url`: where the gateway sends the customer back after
+paying, `<order_id>` replaced by the order number (`https://shop.example.org/checkout/success?ref=<order_id>`), at
+most 2048 characters; surrounding spaces are dropped and an empty one means none. It is stored with the payment
+method as v1's `payment_method.continue_url` is, and never returned. PayU (`payu`,
+`payu_card`, `payu_blik`) and Stripe hosted checkout read it; Stripe opens no session without one. Przelewy24,
+PayPal and Paynow return to the URLs in the method's `additional_data`.
+
+The target must be one the payment step accepts, or the PATCH answers 400 (`VALIDATION_ERROR`, `field:
+"continue_url"`) and changes nothing: a scheme in `PAYMENT_REDIRECT_DIRECT_SCHEMES` (default `https`) goes to the
+gateway as it is, any other goes through the payment bridge and needs its scheme in
+`PAYMENT_REDIRECT_BRIDGE_TARGET_SCHEMES` and, for http/https, its host in `PAYMENT_REDIRECT_ALLOWED_HOSTS`. v1
+checks the same rule only when the order starts the payment.
+
 ### v2 cart warnings (`_errors`)
 
 A cart write (create, PATCH items / addresses / discounts / shipping / payment, merge) answers 200/201 with the full
@@ -2009,10 +2024,16 @@ erased. `manage.py scrub-gateway-payloads` reports how many still hold more (dry
 
 `DELETE /api-admin/checkout/1/{channel}/customer/delete` with `{"email": "<address>"}` (admin key, scope
 `checkout.erase`; `django_checkout.output.admin.admin_customer_delete` is the same for Python callers) anonymises
-the orders and carts of that e-mail. It finds an order by the customer account, by the `billing_email` /
-`shipping_email` columns, by the e-mail a used code stored and by `order_body`, so a repeated request completes an
-order an earlier one left half done. Every match is the whole address, case aside: erasing `anna@example.org` leaves
+the orders and carts of that e-mail. It finds the customer's orders by the account, the `billing_email` /
+`shipping_email` columns, the e-mail of the billing or shipping address in `order_body` and the e-mail a used code
+stored, so a repeated request completes an order an earlier one left half done; carts by the account and the
+address e-mails in `cart_body`. Every match is the whole address, case aside: erasing `anna@example.org` leaves
 `joanna@example.org` alone. A pinned erase token covers its channel only.
+
+Another customer's order or cart that holds the e-mail in some other field keeps everything but that e-mail: in
+every string of the body (a gift card's `recipient_email` in `cart.items[].voucher_gift`, the `comment`, any other
+field) the address becomes the marker, and the rest of the text, the names, the addresses, the e-mail columns and
+the payments stay. The response lists such an order or cart with the others.
 
 | Where | Anonymised | Kept |
 |---|---|---|
@@ -2020,17 +2041,19 @@ order an earlier one left half done. Every match is the whole address, case asid
 | `order_body` / `cart_body` | `comment`, `customer_ip`, gift-card personalisation, payment credentials (`***REDACTED***`, masked voucher codes stay) | totals, items, codes, shipping method and pickup point, `affiliate_code` |
 | `Order` | `billing_email`, `shipping_email` | status, numbers, `customer` (the account erasure in `django_accounts` sets it to NULL) |
 | `UsedCoupon` | `billing_email`, `shipping_email` | the code and the order (`max_uses_per_user` no longer ties the use to the erased e-mail) |
-| `PaymentIntent` | `provider_request`, `provider_notify` stored before payloads went through the allowlist: everything except ids, amounts, currencies, statuses and timestamps | `amount`, `currency`, `external_order_id`, `payment_status`, `code`, `redirect_url` |
+| `PaymentIntent` | `provider_request`, `provider_notify` stored before payloads went through the allowlist: everything except ids, amounts, currencies, statuses and timestamps; `redirect_url` (`***REDACTED***`: the gateway's payment page or, for BLIK, a copy of the body's `continue_url`; only the order's creation answer hands it out) | `amount`, `currency`, `external_order_id`, `payment_status`, `code` |
 | `PaymentRedirect` | `target_url` (`***REDACTED***`: a copy of the body's `continue_url`) | token, expiry, consumption time |
 
 Names and free text become `x` of the same length, e-mails `x…x@example.com`. Not touched: invoices
 (`Invoice.invoice_base64`, kept for accounting), order attachments, shipping tracking numbers, `Order.extra`
-(integrator data), the gateway's own payment link (`PaymentIntent.redirect_url`).
+(integrator data).
 
 #### Orders not fulfilled yet refuse it
 
 While the customer has an order the shop still has to fulfil, the erasure is refused and nothing is anonymised:
-not that order, not the customer's other orders, not the carts. A pinned token looks at its channel's orders only.
+not that order, not the customer's other orders, not the carts. The same goes for another customer's order still to
+fulfil that holds the e-mail (the shop may still have to deliver a gift card to it). A pinned token looks at its
+channel's orders only.
 
 | Status | Refuses the erasure | Why |
 |---|---|---|
@@ -2044,13 +2067,16 @@ not that order, not the customer's other orders, not the carts. A pinned token l
 v1 answers 409 with the blocking orders' ids, numbers and statuses, never the e-mail or any other personal value:
 
 ```json
-{"meta": {"status": "OPEN_ORDERS", "message": "The customer has orders that are not fulfilled yet; nothing was anonymized", ...},
+{"meta": {"status": "OPEN_ORDERS", "message": "The customer has orders that are not fulfilled yet; nothing was anonymized. Cancel or finish the listed orders, then erase again", ...},
  "data": {"deleted": false, "blocking_orders": [{"order_id": "<uuid>", "pretty_id": "0100000042", "status": "confirmed"}]}}
 ```
 
 The Python API raises `django_checkout.output.admin.ErasureBlocked` instead; its `orders` holds the same
-`BlockingOrder(order_id, pretty_id, status)` entries. Ship or cancel the orders (an abandoned unpaid order: cancel it in
-the CMS or with `POST /api/checkout/v2/admin/{channel}/orders/{uid}/cancel/`), then repeat the request. One
+`BlockingOrder(order_id, pretty_id, status)` entries.
+
+To erase the customer, cancel or finish (ship and complete) every listed order, then send the request again.
+Nothing cancels an order by itself: an abandoned order that waits for payment stays `unpaid` and refuses every
+erasure until someone cancels it, in the CMS or with `POST /api/checkout/v2/admin/{channel}/orders/{uid}/cancel/`. One
 gap stays: a cancelled order whose payment still arrives is confirmed again (logged CRITICAL for manual review,
 `notification_state.confirm_order`); erased in between, it has no address left to ship to.
 

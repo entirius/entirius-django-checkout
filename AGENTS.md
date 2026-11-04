@@ -135,7 +135,8 @@ toggles and defaults: `docs/configuration.md`.
   peer otherwise, plus the cart id where the request names one. Behind a proxy `NUM_PROXIES` must be set.
 - `payment_method` is a list (`[voucher, gateway]`): a provider reads its own entry (`own_payment_data`), never
   `primary_payment_method`; which method settles the rest and that vouchers are debited first live in
-  `domain/payment_selection.py`. A voucher on a cart that splits is refused (`voucher_not_supported_on_split_order`):
+  `domain/payment_selection.py`. The method that settles the rest carries the cart's fee and cash on delivery
+  (`process_cart`, `Order.create`); the cart status and product limits read every entry. A voucher on a cart that splits is refused (`voucher_not_supported_on_split_order`):
   split parts are created with the gateway alone.
 - PayU notifications need `second_key` in the method's `additional_data` (403 without it); `checks.py` reports
   PayU methods that lack it as `django_checkout.W001` (database-tagged: `manage.py check --database default`).
@@ -151,7 +152,10 @@ toggles and defaults: `docs/configuration.md`.
   `CustomerService.anonymize_customer` refuses (`ErasureBlocked`, v1 409 `OPEN_ORDERS`) before writing anything while
   one of the orders is outside `SETTLED_ORDER_STATUSES`: the check lives in the service so every entry point gets it.
   `complete-erasures` calls `anonymize()` itself and is never refused. Integrators erase in checkout before deleting
-  the account in `django_accounts`; the other way round orders are found only by the e-mails they hold.
+  the account in `django_accounts`; the other way round orders are found only by the e-mails they hold. The
+  customer's rows are found by fixed fields (account, e-mail columns, address e-mails, used codes), never by a body
+  search: another customer's row that holds the e-mail elsewhere only gets that e-mail replaced
+  (`utils.anonymize_email_in_body`).
 - Gateway payloads (`PaymentIntent.provider_request` / `provider_notify`) are stored through the allowlist in
   `utils/gateway_payload.py` on every `save()`; erasure scrubs rows stored before. A key a reader needs goes into
   `_KEPT_KEYS` with its reason and a test; anything else is dropped. Verify a signature on the raw request, never on

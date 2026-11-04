@@ -59,7 +59,7 @@ def validate_cart_data(
     validated_addresses,
     shipping_method,
     shipping_option,
-    payment_method,
+    payment_methods,
     full_checkout_data: CheckoutData = None,
     customer=None,
     split_order_data=None,
@@ -285,7 +285,7 @@ def validate_cart_data(
             shipping_option_method = shipping_option.method
 
         products_available, allowed_guest_checkout = get_product_available(
-            sku_list, shipping_option_method, payment_method, channel, customer
+            sku_list, shipping_option_method, payment_methods, channel, customer
         )
         item_sum_weight, items_dont_have_weight, unit_weights = check_items_weight(items, channel)
         items_are_too_heavy = check_cart_is_too_heavy(item_sum_weight, shipping_option_method)
@@ -936,7 +936,7 @@ def validate_cart_data(
     if left is None:
         raise BadRequest(message="Cart doesn't have items in request or db. Items are needed in create request.")
     merged_cart = merge(left, cart)
-    _apply_voucher_total(merged_cart, getattr(cart_record, "pk", None))
+    _apply_voucher_total(merged_cart, getattr(cart_record, "pk", None), is_order_creation)
     return merged_cart, msg, cart_weight, validated_addresses
 
 
@@ -1024,7 +1024,24 @@ def check_min_order_price(channel, validated_cart_data):
     return total_to_min_order_price, msg, order_total_too_low
 
 
-def _apply_voucher_total(cart_data, cart_record_id) -> None:
+def _line_charge(item) -> Decimal:
+    """What a line costs before vouchers, as the cart total sums it: its total less its discount, a gift its price."""
+    line_total = Decimal(str(item.total_price or 0))
+    if getattr(item, "is_gratis", False):
+        return line_total
+    return max(line_total - Decimal(str(getattr(item, "discount_amount", None) or 0)), Decimal("0"))
+
+
+def _voucher_lines(cart_data, discounted: bool) -> list[tuple[str, Decimal]]:
+    """(sku, amount) per line for the voucher module: the line total, or what the line costs after its discount."""
+    return [
+        (item.sku, _line_charge(item) if discounted else Decimal(str(item.total_price or 0)))
+        for item in cart_data.items or []
+        if getattr(item, "sku", None)
+    ]
+
+
+def _apply_voucher_total(cart_data, cart_record_id, is_order_creation=False) -> None:
     """Reduce the cart TOTAL by the applied-voucher amount (tender semantics).
 
     A voucher is a payment, not a discount: line items keep their real sold
@@ -1032,6 +1049,11 @@ def _apply_voucher_total(cart_data, cart_record_id) -> None:
     a voucher-mutated price would under-report revenue and break amount
     reconciliation. Only cart-level total/netto/tax shrink; the tender itself is
     carried by ``voucher_amount_applied`` and its own PaymentIntent.
+
+    ``voucher_amount_applied`` is what the total lost, never more. The voucher module lowers what it will debit to
+    the lines it is handed and keeps the lower figure. While the cart is edited it gets the line totals, so a
+    discount code added and removed leaves a voucher's cover alone; the order hands it what each line costs after
+    its discount, which is what it then debits.
 
     Decoupled via ``compute_cart_voucher_total_signal``; no-op when module absent
     or USE_VALIDATE_VOUCHERS_SIGNAL is False.
@@ -1041,9 +1063,7 @@ def _apply_voucher_total(cart_data, cart_record_id) -> None:
     if not getattr(settings, "USE_VALIDATE_VOUCHERS_SIGNAL", False):
         return
 
-    cart_items = [
-        (it.sku, Decimal(str(it.total_price or 0))) for it in (cart_data.items or []) if getattr(it, "sku", None)
-    ]
+    cart_items = _voucher_lines(cart_data, discounted=is_order_creation)
     line_totals: dict[str, Decimal] = {}
     for sku, line_total in cart_items:
         line_totals[sku] = line_totals.get(sku, Decimal("0")) + line_total
@@ -1068,19 +1088,20 @@ def _apply_voucher_total(cart_data, cart_record_id) -> None:
         else:
             total += Decimal(str(response))
 
-    if total <= 0:
-        return
-    cart_data.voucher_amount_applied = total
-
     # Items carry BASE price (the discount lives only in cart_data.discount_amount),
     # so never re-sum items here — reduce the already-discounted total directly.
-    if cart_data.total_price is not None:
-        old_total = Decimal(str(cart_data.total_price))
-        reduction = min(total, old_total)
-        new_total = old_total - reduction
-        ratio = (new_total / old_total) if old_total > 0 else Decimal("0")
-        cart_data.total_price = new_total
-        if cart_data.total_netto_price is not None:
-            cart_data.total_netto_price = (Decimal(str(cart_data.total_netto_price)) * ratio).quantize(Decimal("0.01"))
-        if cart_data.tax_amount is not None:
-            cart_data.tax_amount = (Decimal(str(cart_data.tax_amount)) * ratio).quantize(Decimal("0.01"))
+    if total <= 0 or cart_data.total_price is None:
+        return
+    old_total = Decimal(str(cart_data.total_price))
+    reduction = min(total, old_total)
+    if reduction <= 0:
+        return
+    # The voucher pays what it took off: its payment intent and PayPal's discount read this amount.
+    cart_data.voucher_amount_applied = reduction
+    new_total = old_total - reduction
+    ratio = (new_total / old_total) if old_total > 0 else Decimal("0")
+    cart_data.total_price = new_total
+    if cart_data.total_netto_price is not None:
+        cart_data.total_netto_price = (Decimal(str(cart_data.total_netto_price)) * ratio).quantize(Decimal("0.01"))
+    if cart_data.tax_amount is not None:
+        cart_data.tax_amount = (Decimal(str(cart_data.tax_amount)) * ratio).quantize(Decimal("0.01"))

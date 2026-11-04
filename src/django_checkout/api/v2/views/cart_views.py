@@ -340,7 +340,11 @@ class CartPaymentView(CheckoutChannelMixin, APIView):
 
     @extend_schema(
         summary="Select payment method",
-        description="Select a payment method. Optionally include bank ID, card token.",
+        description=(
+            "Select a payment method. Optionally include bank ID, card token and `continue_url`, where the gateway "
+            "returns the customer after paying (PayU, PayU card and BLIK, Stripe hosted checkout); 400 for a target "
+            "the payment step would refuse."
+        ),
         tags=["Checkout Cart"],
         request=PaymentPatchRequest,
         responses={200: CartV2Response},
@@ -364,6 +368,7 @@ class CartPaymentView(CheckoutChannelMixin, APIView):
                 card=body.card,
                 save_card=body.save_card,
                 pay_code=body.pay_code,
+                continue_url=body.continue_url,
                 customer=customer,
                 geo_country=geo_country,
             )

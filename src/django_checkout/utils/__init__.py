@@ -1,4 +1,5 @@
 import copy
+import re
 from decimal import Decimal
 
 from django_checkout.enums import PaymentProvider
@@ -176,3 +177,29 @@ def anonymize_addresses_in_body(body: dict) -> bool:
             _anonymize_fields(addr, _PII_FIELDS)
             save = True
     return _anonymize_gift_items(body) or save
+
+
+def _email_pattern(email: str) -> re.Pattern:
+    """``email`` as a whole address, case aside: not the tail of a longer one (``jo`` + it) nor its head (``.uk``)."""
+    return re.compile(rf"(?<![\w.!#$%&'*+/=?^`{{|}}~-]){re.escape(email)}(?![\w-]|\.[\w-])", re.IGNORECASE)
+
+
+def _replace_in_strings(node, pattern: re.Pattern, marker: str) -> bool:
+    entries = node.items() if isinstance(node, dict) else enumerate(node) if isinstance(node, list) else ()
+    changed = False
+    for key, value in list(entries):
+        if isinstance(value, str) and (replaced := pattern.sub(marker, value)) != value:
+            node[key] = replaced
+            changed = True
+        elif isinstance(value, dict | list):
+            changed = _replace_in_strings(value, pattern, marker) or changed
+    return changed
+
+
+def anonymize_email_in_body(body: dict, email: str) -> bool:
+    """Replace ``email`` in every string of ``body`` that holds it, in place; nothing else changes.
+
+    For another customer's order or cart: the erased person is a gift card's recipient there, or named in a comment.
+    True if the body held it.
+    """
+    return _replace_in_strings(body, _email_pattern(email), anonymize(email, "email"))
