@@ -17,6 +17,11 @@ class OrderCreateResponse(BaseModel):
     order_status: str = Field(description="Initial order status", examples=["UNPAID"])
     redirect_url: str | None = Field(None, description="Payment provider redirect URL")
     split_orders_pretty_ids: list[str] = Field(default_factory=list, description="IDs of split orders if applicable")
+    payment_error: bool = Field(
+        False,
+        description="In the body only when the order was created but the payment provider reported an error: "
+        "always true then, and the order stays unpaid. Absent means false.",
+    )
 
 
 class OrderAttachmentResponse(BaseModel):

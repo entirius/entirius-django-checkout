@@ -8,8 +8,12 @@ Channel-scoped: every rule is filtered/validated against the URL channel via the
 DiscountRuleCode.channels M2M, so an admin acting on channel A cannot read or mutate a
 rule that belongs only to channel B. Views stay thin and delegate here.
 
+A code is unique per (channel, currency): creating a code, renaming one, or changing a rule's channels or
+currencies into a clash is refused (``code_clashes``); a clash already stored keeps working.
+
 Raises:
     ObjectDoesNotExist — resource missing or outside the channel (view -> 404).
+    DiscountCodeClash — a ValueError naming the request field of the clashing code (view -> 400 on that field).
     ValueError — invalid modifier/target/inclusion value (view -> 400).
 """
 
@@ -44,6 +48,7 @@ from django_checkout.schemas.requests.discount import (
     DiscountRuleUpdateInput,
     ProductFilterInput,
 )
+from django_checkout.services.code_clashes import Scope, refuse_clash, refuse_scope_change
 
 logger = logging.getLogger("checkout.discount_service")
 
@@ -207,7 +212,8 @@ def create_rule(channel: Channel, data: DiscountRuleCreateInput) -> DiscountRule
     _apply_scalars(rule, data, _RULE_SCALARS, partial=False)
     rule.save()
     _set_rule_m2m(rule, channel, channels=data.channels, currencies=data.currencies, methods=data.free_shipping_methods)
-    for code_input in data.codes:
+    for index, code_input in enumerate(data.codes):
+        refuse_clash(code_input.code, rule, field=f"codes.{index}.code")
         _create_code(rule, code_input)
     return _get_rule(channel, rule.pk)
 
@@ -216,6 +222,7 @@ def create_rule(channel: Channel, data: DiscountRuleCreateInput) -> DiscountRule
 def update_rule(channel: Channel, rule_id: int, data: DiscountRuleUpdateInput) -> DiscountRuleCode:
     _validate_enums(modifier=data.modifier, target=data.target)
     rule = _get_rule(channel, rule_id)
+    before = Scope.of(rule)
     _apply_scalars(rule, data, _RULE_SCALARS, partial=True)
     rule.save()
     provided = data.model_fields_set
@@ -225,6 +232,9 @@ def update_rule(channel: Channel, rule_id: int, data: DiscountRuleUpdateInput) -
         rule.currencies.set(Currency.objects.filter(iso3__in=[c.upper() for c in (data.currencies or [])]))
     if "free_shipping_methods" in provided:
         rule.free_shipping_methods.set(_methods_qs(channel, data.free_shipping_methods or []))
+    after = Scope.of(rule)
+    field = "currencies" if after.currencies != before.currencies else "channels"
+    refuse_scope_change(rule, before, after, field=field)
     return _get_rule(channel, rule.pk)
 
 
@@ -337,7 +347,9 @@ def list_codes(channel: Channel, rule_id: int, params=None) -> QuerySet:
 
 
 def create_code(channel: Channel, rule_id: int, data: DiscountCodeInput) -> DiscountCode:
-    return _create_code(_get_rule(channel, rule_id), data)
+    rule = _get_rule(channel, rule_id)
+    refuse_clash(data.code, rule, field="code")
+    return _create_code(rule, data)
 
 
 def _create_code(rule: DiscountRuleCode, data: DiscountCodeInput) -> DiscountCode:
@@ -355,7 +367,10 @@ def _create_code(rule: DiscountRuleCode, data: DiscountCodeInput) -> DiscountCod
 
 
 def update_code(channel: Channel, rule_id: int, code_id: int, data: DiscountCodeUpdateInput) -> DiscountCode:
-    code = _get_code(_get_rule(channel, rule_id), code_id)
+    rule = _get_rule(channel, rule_id)
+    code = _get_code(rule, code_id)
+    if "code" in data.model_fields_set and data.code != code.code:
+        refuse_clash(data.code, rule, field="code", exclude_code_id=code.pk)
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(code, field, value)
     code.save()
