@@ -135,6 +135,12 @@ toggles and defaults: `docs/configuration.md`.
   peer otherwise, plus the cart id where the request names one. Behind a proxy `NUM_PROXIES` must be set.
 - PayU notifications need `second_key` in the method's `additional_data` (403 without it); `checks.py` reports
   PayU methods that lack it as `django_checkout.W001` (database-tagged: `manage.py check --database default`).
+- PayPal notifications need `webhook_id` in the method's `additional_data` and are verified by PayPal's
+  verify-webhook-signature postback (403 without the id, on a failed or unreachable check, or for a non-PayPal
+  payment); `checks.py` reports PayPal methods that lack it as `django_checkout.W002`.
+- Gateway statuses go through `domain/payment_provider/notification_state.py` (`apply_payment_status` under
+  `lock_payment_intent`): COMPLETE is final, CANCELLED yields only to COMPLETE, orders are confirmed / cancelled only
+  while they await payment. BI finish tags are grouped on in reports: keep their wording (`describe`).
 - A discount code is unique per (channel, currency), a rule without currencies covering every currency
   (`services/code_clashes.py`, `docs/api/discounts.md`). Every write path (v2 admin service, Django admin forms,
   `import-discount-rules`) calls `refuse_clash` / `refuse_scope_change`; a new one must too. No DB constraint

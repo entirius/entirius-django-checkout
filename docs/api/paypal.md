@@ -13,9 +13,12 @@ Minimalne dane to:
 
 - Dane dostępowe do PayPal w additional_data np:
   - Uwaga: nie podanie `"use_sandbox"` skutkuje zawsze uzywaniem sandboxa.
+  - `"webhook_id"`: the webhook id from the PayPal developer dashboard (the REST app -> Webhooks -> Webhook ID),
+    same sandbox/live environment as `client_id`. Without it `notify/paypal/` refuses every notification (403);
+    see [POST Webhook (notify)](#post-webhook-notify).
 
 ```json
-{"client_id": "<client-id-from-paypal-panel>", "use_sandbox": true, "client_secret": "<client-secret-from-paypal-panel>", "return_url":  "... link do strony frontu, która strzeli z parametrami do naszego backendowego endpointu w przypadku potwierdzenia płatności...", "cancel_url": "... link do strony frontu, która strzeli z parametrami do naszego backendowego endpointu w przypadku anulowania płatności..."}
+{"client_id": "<client-id-from-paypal-panel>", "use_sandbox": true, "client_secret": "<client-secret-from-paypal-panel>", "webhook_id": "<webhook-id-from-paypal-panel>", "return_url":  "... link do strony frontu, która strzeli z parametrami do naszego backendowego endpointu w przypadku potwierdzenia płatności...", "cancel_url": "... link do strony frontu, która strzeli z parametrami do naszego backendowego endpointu w przypadku anulowania płatności..."}
 ```
 
 ## Używanie
@@ -89,6 +92,32 @@ Pozwala anulować płatność na podstawie tokenu podanego w parametrze.
 | Parameter | Description |
 |-----------|-------------|
 | token     | (str)       |
+
+## POST Webhook (notify)
+
+```bash
+# Address to register as the webhook URL in the PayPal dashboard:
+{{<base_url>}}/checkout/v1/<channel_idx>/notify/paypal/
+```
+
+PayPal posts payment events here (for example `PAYMENT.CAPTURE.COMPLETED`, `CHECKOUT.ORDER.APPROVED`). The endpoint
+changes the payment and the order only when:
+
+- the PayPal order id in the event belongs to a payment whose payment_method has the PayPal provider (an event for a
+  PayU, Stripe or other payment is answered 403),
+- that payment_method has `webhook_id` in additional_data,
+- PayPal confirms the signature: `POST /v1/notifications/verify-webhook-signature` with the `PAYPAL-*` transmission
+  headers, the `webhook_id` and the event as received, on that payment_method's credentials (10 s timeout).
+
+When the payment exists but any of these fails, the answer is 403 and nothing is written. PayPal redelivers a
+notification answered with anything but 2xx (for about 3 days), so webhooks refused before `webhook_id` is set land
+once it is. `manage.py check --database default` lists PayPal methods without it (`django_checkout.W002`).
+
+A body that cannot be processed (not JSON, no `resource.id`, no `supplementary_data` on `PAYMENT.CAPTURE.COMPLETED`,
+an unknown payment) gets 200 with `status: FAIL` and writes nothing either; PayPal does not redeliver those.
+
+PayPal sends every event of an app to every webhook of that app. Several channels on one PayPal app (the same
+`client_id`): one webhook, and the same `webhook_id` in all their payment_methods.
 
 
 

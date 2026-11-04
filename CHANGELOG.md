@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+### Security
+
+- PayPal: `notify/paypal/` changes a payment only when PayPal confirms the notification's signature
+  (verify-webhook-signature, against the `webhook_id` in the payment method's `additional_data`) and the payment
+  belongs to a PayPal payment method. Anything else is answered 403 and writes nothing; PayPal redelivers it. The
+  verification calls PayPal with a 10 s timeout. `django_checkout.W002` (`manage.py check --database default`)
+  lists PayPal methods without `webhook_id`.
+- PayPal: the webhook, the buyer's return and the cancel return only move a payment forward. A COMPLETE payment
+  stays final, a CANCELLED one gives way only to a completed payment; an order is confirmed only while it waits for
+  payment (or after a cancellation: logged for manual review, its stock reservation is gone) and cancelled only while
+  it waits for payment. Statuses are applied under a row lock on the payment and its order. The cancel return
+  records a cancellation only: for an approved or completed PayPal order it changes nothing and captures nothing.
+  BI finish tags keep their wording; new outcomes add their own (`..., Order status <status> kept`,
+  `PaymentIntent is already <status>, <status> ignored`).
+- Paynow: notifications go through the same rules: a late or repeated status no longer pulls a COMPLETE payment
+  back, re-confirms an order that moved on, or cancels an order confirmed by hand. BI finish tags keep their wording.
+
+### Upgrade notes
+
+- **PayPal:** every PayPal payment method needs `webhook_id` (PayPal developer dashboard: the REST app, Webhooks,
+  Webhook ID of the webhook pointing at `notify/paypal/`) in its `additional_data`. Without it webhook notifications
+  are refused (PayPal retries them for about 3 days) and an order is confirmed only when the buyer returns to the
+  shop.
+
+### Fixed
+
+- PayPal: the buyer's return (`return/paypal/`) saves the status PayPal's capture API reports on the payment and
+  the order. It answered 500 after the capture and saved nothing, so only the webhook confirmed PayPal orders.
 ### Added
 
 - A discount code is unique per (channel, currency): two rules that share a channel and a currency (a rule
@@ -15,8 +43,6 @@
   touch them goes through. No migration and no database constraint: the new configuration check
   `checkout.discount_codes` (`manage.py check --database default --tag checkout.discount_codes`, and the CMS
   through django-munin) lists the stored ones per channel. Reference: `docs/api/discounts.md`.
-
-### Fixed
 
 - A gift of a SKU the customer also buys is a line of its own: it no longer replaces the bought line (a bought mug
   and the same mug picked as the gift came out as one mug at the gift price, `changed_price`). The gift is refused
