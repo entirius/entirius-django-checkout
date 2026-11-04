@@ -9,19 +9,22 @@ import os
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.http import FileResponse
-from drf_spectacular.utils import OpenApiExample, OpenApiParameter, extend_schema
+from drf_spectacular.utils import OpenApiExample, OpenApiParameter, OpenApiResponse, extend_schema
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
+from django_checkout.api.v2.exceptions import CartNotReadyConflict, DiscountCodeConflict
 from django_checkout.api.v2.mixins import CheckoutChannelMixin
 from django_checkout.api.v2.openapi import CHANNEL_PARAM, FILE_PARAM, ORDER_PARAM, PRETTY_ID_PARAM
-from django_checkout.api.v2.permissions import ChannelAPIKeyPermission
+from django_checkout.api.v2.permissions import GUEST_PERMISSIONS, ChannelAPIKeyPermission
+from django_checkout.domain.validators.order import CartNotReady
 from django_checkout.models import Order, OrderAttachment
 from django_checkout.schemas.responses.order import OrderCreateResponse, OrderListResponse
 from django_checkout.services import order_service
+from django_checkout.services.discount_usage import DiscountCodeRefused
 from django_checkout.utils import redact_payment_secrets
 
 logger = logging.getLogger("checkout.v2.orders")
@@ -30,13 +33,23 @@ logger = logging.getLogger("checkout.v2.orders")
 @extend_schema(parameters=[CHANNEL_PARAM])
 class OrderCreateView(CheckoutChannelMixin, APIView):
     authentication_classes = [JWTAuthentication]
-    permission_classes = [ChannelAPIKeyPermission]
+    permission_classes = GUEST_PERMISSIONS
 
     @extend_schema(
         summary="Create order",
         description="Finalize cart into order. Validates everything, reserves stock, initiates payment.",
         tags=["Checkout Orders"],
-        responses={201: OrderCreateResponse},
+        responses={
+            201: OrderCreateResponse,
+            409: OpenApiResponse(
+                description=(
+                    "The cart cannot become an order yet, or a discount code it applied can no longer be used; "
+                    "nothing is ordered. `error` is the reason: `ADDRESSES_NOT_SELECTED`, `SHIPPING_OPTION_NOT_SELECTED`, "
+                    "`PAYMENT_OPTION_NOT_SELECTED`, `OUT_OF_STOCK`, or a `DISCOUNT_*` code as in the cart's `_errors` "
+                    "(`DISCOUNT_USAGE_LIMIT_REACHED`, `DISCOUNT_PER_USER_LIMIT_REACHED`, `DISCOUNT_EXPIRED`, ...)."
+                )
+            ),
+        },
     )
     def post(self, request, **kwargs):
         channel = self.get_channel()
@@ -55,6 +68,11 @@ class OrderCreateView(CheckoutChannelMixin, APIView):
             )
         except ObjectDoesNotExist:
             return Response({"error": "NOT_FOUND", "message": "Cart does not exist."}, status=404)
+        except CartNotReady as exc:
+            # ``status`` may name a SKU after the code ("OUT_OF_STOCK sku: X"); the message names it too.
+            raise CartNotReadyConflict(exc.message, code=exc.status.split()[0]) from exc
+        except DiscountCodeRefused as exc:
+            raise DiscountCodeConflict.refusing(exc.code, exc.reason) from exc
 
         response = OrderCreateResponse(
             order_id=str(result.order.order_id) if result.order else "",
@@ -62,10 +80,10 @@ class OrderCreateView(CheckoutChannelMixin, APIView):
             order_status=result.order.order_status if result.order else "",
             redirect_url=result.redirect_url,
             split_orders_pretty_ids=result.split_pretty_ids,
+            payment_error=result.payment_failed,
         )
-        data = response.model_dump()
-        if result.payment_failed:
-            data["payment_error"] = True
+        # payment_error is in the body only when the payment failed, as before.
+        data = response.model_dump(exclude=None if response.payment_error else {"payment_error"})
         return Response(data, status=status.HTTP_201_CREATED)
 
 

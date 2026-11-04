@@ -21,6 +21,58 @@
 - `import-discount-rules` (and the CSV import in the Django admin) no longer hangs. The mode-of-action loop of a
   row never ended once the row ran out of modes (`is_inclusion_or_exclusion_<n>` empty or missing), so the import
   never reached the row's codes or the next row; the admin import held the request until it timed out.
+- An order is refused when a valid item is priced 0 (`UNPROCESSABLE_ENTITY sku: <sku>`, v1 403). `OrderValidation`
+  compared `str(total_price) == 0`, a string against an int, so the check never fired and such an item went into
+  the order. A gift still passes at 0 (`GRATIS_MECHANISM = 2`, `GRATIS_PRICE = 0`), and an item that is not valid
+  keeps its own reason (`OUT_OF_STOCK`), not the 0 that `invalid_factory` gives it.
+- A v1 order with a code that sits on more than one rule (one code on an EUR and a PLN rule, as `GRATIS_STEP` in
+  the test package, or the same code in another channel) no longer fails after the order is saved. `use_discounts`
+  looked the code up by its text alone and raised `MultipleObjectsReturned`, so the customer got 403
+  `INVALID_REQUEST` for an order that existed. The usage now counts on the code row the cart applied: a rule of the
+  order's channel and currency (or of none), of the same kind (typed or automatic) and modifier, lowest pk on a tie.
+- v2 API (client-visible): `POST orders/` counts the discount codes it takes, as v1 does. It never did, so
+  `max_used` and `max_uses_per_user` limited nothing for v2 orders and a one-use code worked forever. v1 and v2 now
+  count through one function (`services/discount_usage.py`), in the order's transaction, with an update that takes a
+  use only while one is left: of two orders racing for the last use, one is not saved. A v2 order whose cart holds a
+  code that no longer applies (used up, the per-address limit reached, expired, ...) is refused with 409 and the
+  code's reason as `error` (`DISCOUNT_USAGE_LIMIT_REACHED`, ...) instead of being placed without the discount at a
+  total the customer never saw. v1 keeps placing such an order without the code. A v1 order that lost the last use,
+  or took an automatic rule whose code was at `max_used`, no longer answers 403 for an order that was saved; the
+  first is not saved, the second is placed and its code stops counting at the limit. The floor of
+  `entirius-django-utils` moves to 2.1.0 (the v2 handler keeps a 409's code).
+- A discount rule limited to some currencies (`currencies`) applies only to carts in one of them; a rule with none
+  applies in every currency, as before. Only the gratis offer list read the field, so a PLN-only automatic rule
+  discounted an EUR cart, a PLN-only rule could win priority arbitration on an EUR cart and block its codes, and a
+  code on an EUR and a PLN rule (`GRATIS_STEP` in the test package) took the PLN rule on an EUR cart and offered no
+  gift. A code whose rules all leave out the cart currency is rejected as `currency_not_supported` (v2
+  `DISCOUNT_CURRENCY_NOT_SUPPORTED`, meta `currency`); v1 lists it under `one_or_more_discount_invalid`.
+- `django_checkout.output.quantities.get_bundle_quantities(skus, channel_idx)`: how many of each bundle its
+  components allow, as the cart counts a bundle line (the bundle's own Stock row does not decide; with limits, the
+  required and default components). For other modules that answer stock, so a bundle they report available is one
+  the cart accepts. SKUs that are not bundles are left out.
+
+- A bundle counts all of its components when several bundles are checked at once. The links were grouped by
+  adjacent rows of an unordered query, so a bundle whose links came apart kept only the last group of them.
+- v2 API (client-visible): `gratis.rules` of a cart lists the gift rules, as `GET carts/{id}/gratis-rules/` does. It was
+  read from `gratis_rules`, a legacy field nothing fills, so it stayed empty next to `is_available: true`.
+- v2 OpenAPI (client-visible, schema only): `POST orders/` lists `payment_error` in `OrderCreateResponse`. The 201 body
+  has carried `payment_error: true` when the order was created but the payment provider failed, and the schema did
+  not name it. The body is unchanged: the field is there only on a failed payment.
+- v2 OpenAPI (client-visible, schema only): the guest routes (carts and their steps, `countries/`, `POST orders/`)
+  declare the channel key without the customer JWT next to the key with it. They declared
+  `[{ApiKeyAuth: [], jwtAuth: []}]`, both required, though a guest works with `X-API-KEY` alone, so the schema
+  could not tell them from the customer routes (`orders/list/`, `carts/latest/`, merge), which still need both.
+  Access does not change.
+- v2 API (client-visible): `POST orders/` on a cart that cannot become an order yet answers 409 with the reason in
+  `error` (`ADDRESSES_NOT_SELECTED`, `SHIPPING_OPTION_NOT_SELECTED`, `PAYMENT_OPTION_NOT_SELECTED`, `OUT_OF_STOCK`).
+  It answered 500 `INTERNAL_ERROR`, because `OrderValidation` raises a v1 exception the v2 handler does not know, so a
+  customer whose item sold out during checkout got no reason. The v1 response stays 403.
+- v2 API (client-visible): `subtotal_gross` and `subtotal_net` of a cart are the items alone, as the schema says
+  ("before shipping"). They were taken from `base_total`, which adds shipping before its reduction and the payment fee,
+  so the subtotal moved when the customer chose a shipping method: 100.00 of items with free shipping answered
+  `subtotal_gross` 109.99 next to `total_gross` 100.00. `total_gross`, `total_net` and `total_tax` don't change, and
+  neither does `base_total` in the v1 response.
+
 
 ## 10.0.1 — 2026-10-27
 
