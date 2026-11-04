@@ -90,6 +90,14 @@
   customer's BLIK code on no order, with or without a voucher: it looked for `pay_code` on the list itself. PayPal's
   breakdown carries the voucher in `discount`: the amount is net of the voucher and the parts were not, so PayPal
   refused the order.
+- `cheapest_gratis` and `most_expensive_gratis` give their discount (client-visible: cart totals drop). The rule's
+  units of the chosen item (`extra_value`, at most what the cart holds) come at the gift price, as a picked gift does
+  (`GRATIS_PERCENT_DISCOUNT` down to `GRATIS_PRICE`, or `GRATIS_PRICE` under `GRATIS_MECHANISM = 2`), never above
+  the item's own price; a channel that discounts net prices gets the same gift price. The discount was computed and
+  then overwritten with the item's earlier discount, so the code came out valid at 0. The item is picked by price
+  among the bought lines: a gift line, always the cheapest at the gift price, is never picked, and a line with more
+  units no longer wins over a cheaper (or dearer) one; quantity only breaks a price tie.
+
 - Merging a guest cart into the customer's cart no longer fails, v1 (`carts/{id}/merge/`) and v2
   (`POST carts/{id}/merge/`). `CartRequest.factory()` left out five fields the request requires
   (`custom_order_id`, `requested_delivery_date`, `split_order`, `affiliate_code`, `customer_ip`), so every merge
@@ -109,6 +117,9 @@
   the order. It answered 500 after the capture and saved nothing, so only the webhook confirmed PayPal orders.
 ### Added
 
+- Docs: `docs/api/checkout.md` (Code usage) says what an order that loses the race for a code's last use leaves
+  behind. It has already opened a payment session at the gateway when it rolls back; the customer never gets the
+  session, no money moves, and the gateway keeps it as an abandoned, unpaid session.
 - A discount code is unique per (channel, currency): two rules that share a channel and a currency (a rule
   without currencies holds every currency) may not hold the same code. The same code on rules of other channels
   or of other currencies stays allowed (`GRATIS_STEP` on an EUR and a PLN rule). Admin API v2 (client-visible
