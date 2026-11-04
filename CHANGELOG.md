@@ -19,6 +19,10 @@
 - Paynow: notifications go through the same rules: a late or repeated status no longer pulls a COMPLETE payment
   back, re-confirms an order that moved on, or cancels an order confirmed by hand. BI finish tags keep their wording.
 
+- Autopay: `notify/autopay/` verifies an ITN only with a non-empty `AUTOPAY_HASH_KEY` entry of the channel in the
+  URL; without one the ITN is answered 400 `NOTCONFIRMED` (it was 500 for a channel missing from the setting). The
+  hash is compared in constant time.
+
 ### Upgrade notes
 
 - **PayPal:** every PayPal payment method needs `webhook_id` (PayPal developer dashboard: the REST app, Webhooks,

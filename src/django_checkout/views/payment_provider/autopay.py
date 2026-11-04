@@ -3,6 +3,7 @@
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 import base64
+import hmac
 from urllib.parse import unquote
 from xml.etree import ElementTree as ET  # builds the confirmation only; provider XML is parsed by defusedxml
 
@@ -130,6 +131,14 @@ def autopay_return(request: HttpRequest, channel_idx=None, *args, **kwargs) -> H
             )
             # Weryfikacja hash
             received_hash = root.find(".//hash").text
+            if not (settings.AUTOPAY_HASH_KEY or {}).get(channel_idx):
+                # Without the channel's own non-empty key there is nothing secret to verify the hash with.
+                logger.error(f"AUTOPAY_HASH_KEY has no key for channel {channel_idx}, cannot verify ITN")
+                return HttpResponse(
+                    generate_confirmation_xml(service_id, order_id, "NOTCONFIRMED", received_hash),
+                    content_type="text/xml",
+                    status=400,
+                )
             generate_hash_args = extract_from_xml(root)
             calculated_hash = generate_hash(
                 channel=channel_idx, hash_key=settings.AUTOPAY_HASH_KEY, **generate_hash_args
@@ -149,7 +158,7 @@ def autopay_return(request: HttpRequest, channel_idx=None, *args, **kwargs) -> H
                 "body": xml_data,
             }
 
-            if received_hash != calculated_hash:
+            if not hmac.compare_digest(str(received_hash or "").encode(), calculated_hash.encode()):
                 logger.add_log_param("extra", extra)
                 logger.error("Hash verification failed")
                 return HttpResponse(
