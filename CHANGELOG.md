@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- v2 API (client-visible): `subtotal_gross` and `subtotal_net` of a cart are the items alone, as the schema says
+  ("before shipping"). They were taken from `base_total`, which adds shipping before its reduction and the payment fee,
+  so the subtotal moved when the customer chose a shipping method: 100.00 of items with free shipping answered
+  `subtotal_gross` 109.99 next to `total_gross` 100.00. `total_gross`, `total_net` and `total_tax` don't change, and
+  neither does `base_total` in the v1 response.
+
 ## 10.0.1 — 2026-10-27
 
 ### Added
