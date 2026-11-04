@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- A v1 order with a code that sits on more than one rule (one code on an EUR and a PLN rule, as `GRATIS_STEP` in
+  the test package, or the same code in another channel) no longer fails after the order is saved. `use_discounts`
+  looked the code up by its text alone and raised `MultipleObjectsReturned`, so the customer got 403
+  `INVALID_REQUEST` for an order that existed. The usage now counts on the code row the cart applied: a rule of the
+  order's channel and currency (or of none), of the same kind (typed or automatic) and modifier, lowest pk on a tie.
+
 ## 10.0.1 — 2026-10-27
 
 ### Added
