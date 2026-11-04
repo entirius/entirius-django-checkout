@@ -4,8 +4,8 @@
 
 """Configuration checks that read the database (``manage.py check --database default``, ``migrate``).
 
-``checkout.discount_codes`` carries the ``entirius_config`` tag and its code instead of ``database``, so django-munin
-shows it in the CMS; it reads the database only when the run passes one and the table exists.
+``checkout.discount_codes`` and ``django_checkout.W002`` carry the ``entirius_config`` tag and their code instead of
+``database``, so django-munin shows them in the CMS; they read the database only when the run passes one.
 """
 
 from django.core.checks import Tags, register
@@ -18,6 +18,8 @@ from django_checkout.enums import PaymentProvider
 
 PAYU_PROVIDERS = (PaymentProvider.PAYU, PaymentProvider.PAYU_CARD, PaymentProvider.PAYU_BLIK)
 CODE_CLASHES = "checkout.discount_codes"
+PAYPAL_WEBHOOK_ID = "django_checkout.W002"
+PAYPAL_FIX_URL = "https://github.com/entirius/entirius-django-checkout/blob/master/docs/api/paypal.md"
 CODE_CLASHES_FIX_URL = "https://github.com/entirius/entirius-django-checkout/blob/master/docs/api/discounts.md#one-code-per-channel-and-currency"
 
 
@@ -62,19 +64,26 @@ def payu_methods_have_second_key(app_configs, databases=None, **kwargs) -> list[
     ]
 
 
-@register(Tags.database)
+@register("entirius_config", PAYPAL_WEBHOOK_ID)
 def paypal_methods_have_webhook_id(app_configs, databases=None, **kwargs) -> list[CheckWarning]:
-    """PayPal notifications are refused (403) for a method without ``webhook_id``: only the buyer's return confirms."""
+    """PayPal notifications are refused (403) for a method without ``webhook_id``: only the buyer's return confirms.
+
+    Tagged ``entirius_config`` so django-munin shows it in the CMS; the CMS writes its own title, so the methods are
+    named in the hint.
+    """
     missing = _missing(databases, (PaymentProvider.PAYPAL,), WEBHOOK_ID_FIELD)
     if not missing:
         return []
     return [
         CheckWarning(
-            f"PayPal payment methods without '{WEBHOOK_ID_FIELD}' in additional_data: {', '.join(missing)}. "
-            "Their webhook notifications are refused, so an order is confirmed only when the buyer returns "
-            "to the shop.",
-            hint=f"Set '{WEBHOOK_ID_FIELD}' (PayPal developer dashboard: the app's Webhooks, Webhook ID) on each method.",
-            id="django_checkout.W002",
+            f"PayPal payment methods without '{WEBHOOK_ID_FIELD}' in additional_data",
+            hint=(
+                f"{', '.join(missing)}. Their webhook notifications are refused, so an order is confirmed only when "
+                f"the buyer returns to the shop. Set '{WEBHOOK_ID_FIELD}' (PayPal developer dashboard: the app's "
+                "Webhooks, Webhook ID) on each method."
+            ),
+            id=PAYPAL_WEBHOOK_ID,
+            obj=_Subject(scope="PayPal payment methods", state="unconfigured", severity="high", fix_url=PAYPAL_FIX_URL),
         )
     ]
 
