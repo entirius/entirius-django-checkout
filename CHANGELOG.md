@@ -9,6 +9,16 @@
   `[{ApiKeyAuth: [], jwtAuth: []}]`, both required, though a guest works with `X-API-KEY` alone, so the schema
   could not tell them from the customer routes (`orders/list/`, `carts/latest/`, merge), which still need both.
   Access does not change.
+- v2 API (client-visible): `POST orders/` on a cart that cannot become an order yet answers 409 with the reason in
+  `error` (`ADDRESSES_NOT_SELECTED`, `SHIPPING_OPTION_NOT_SELECTED`, `PAYMENT_OPTION_NOT_SELECTED`, `OUT_OF_STOCK`).
+  It answered 500 `INTERNAL_ERROR`, because `OrderValidation` raises a v1 exception the v2 handler does not know, so a
+  customer whose item sold out during checkout got no reason. The v1 response stays 403.
+- v2 API (client-visible): `subtotal_gross` and `subtotal_net` of a cart are the items alone, as the schema says
+  ("before shipping"). They were taken from `base_total`, which adds shipping before its reduction and the payment fee,
+  so the subtotal moved when the customer chose a shipping method: 100.00 of items with free shipping answered
+  `subtotal_gross` 109.99 next to `total_gross` 100.00. `total_gross`, `total_net` and `total_tax` don't change, and
+  neither does `base_total` in the v1 response.
+
 
 ## 10.0.1 — 2026-10-27
 
