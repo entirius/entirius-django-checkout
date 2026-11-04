@@ -247,6 +247,14 @@ class GratisInfoResponse(BaseModel):
     rules: list[dict] = Field(default_factory=list, description="Available gratis rules (always array)")
 
 
+def _gratis_rules(cart) -> list[dict]:
+    """The rules the cart holds. A legacy stored shape (bare codes, one rule as a dict) lists none."""
+    rules = getattr(cart, "available_gratis_rules", None)
+    if not isinstance(rules, list):
+        return []
+    return [rule for rule in rules if isinstance(rule, dict)]
+
+
 class CartErrorDetail(BaseModel):
     """A warning about one part of the cart. The write itself succeeded (HTTP 200/201)."""
 
@@ -404,7 +412,7 @@ class CartV2Response(BaseModel):
                 is_available=getattr(cart, "is_gratis_available", False) or False,
                 nearest_tier_price=format_money(getattr(cart, "amount_required_for_nearest_gratis_rule", None)),
                 amount_missing=format_money(getattr(cart, "amount_missing_for_nearest_gratis_rule", None)),
-                rules=getattr(cart, "gratis_rules", None) or [],
+                rules=_gratis_rules(cart),
             )
 
         return cls(

@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- v2 API (client-visible): `gratis.rules` of a cart lists the gift rules, as `GET carts/{id}/gratis-rules/` does. It was
+  read from `gratis_rules`, a legacy field nothing fills, so it stayed empty next to `is_available: true`.
 - v2 OpenAPI (client-visible, schema only): `POST orders/` lists `payment_error` in `OrderCreateResponse`. The 201 body
   has carried `payment_error: true` when the order was created but the payment provider failed, and the schema did
   not name it. The body is unchanged: the field is there only on a failed payment.
