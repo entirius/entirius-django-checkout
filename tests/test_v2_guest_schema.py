@@ -10,6 +10,10 @@ the key hook of django_access then turns it into the channel key alone."""
 import pytest
 from django.urls import include, path
 from drf_spectacular.generators import SchemaGenerator
+from rest_framework.test import APIRequestFactory
+
+from django_checkout.api.v2.permissions import GUEST_PERMISSIONS
+from django_checkout.api.v2.urls import urlpatterns
 
 PATTERNS = [path("api/checkout/v2/<str:channel_idx>/", include("django_checkout.api.v2.urls"))]
 PREFIX = "/api/checkout/v2/{channel_idx}/"
@@ -50,4 +54,22 @@ def test_a_guest_route_does_not_require_the_jwt(paths, method, route):
 
 @pytest.mark.parametrize(("method", "route"), CUSTOMER)
 def test_a_customer_route_requires_the_jwt(paths, method, route):
-    assert {} not in paths[PREFIX + route][method].get("security", [])
+    security = paths[PREFIX + route][method].get("security")
+
+    assert security and {} not in security
+
+
+GUEST_VIEWS = [p.callback for p in urlpatterns if p.callback.cls.permission_classes is GUEST_PERMISSIONS]
+
+
+def test_the_guest_views_are_the_twelve_guest_routes():
+    assert len(GUEST_VIEWS) == len({route for _, route in GUEST}) == 12
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("view", GUEST_VIEWS, ids=lambda view: view.cls.__name__)
+def test_a_guest_route_still_refuses_a_request_without_the_key(view, channel):
+    """AllowAny only tells drf-spectacular the JWT is optional; the channel key stays required."""
+    request = APIRequestFactory().get("/")
+
+    assert view(request, channel_idx=channel.idx, cart_id="any").status_code == 401

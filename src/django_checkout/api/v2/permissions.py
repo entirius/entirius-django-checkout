@@ -48,4 +48,4 @@ class ChannelAPIKeyPermission(BasePermission):
 # A guest route: the channel key alone, plus the customer JWT when there is one. AllowAny grants nothing, since DRF
 # requires every class to pass; it is how drf-spectacular learns that the JWT is optional, so the schema offers the
 # key without it next to the key with it.
-GUEST_PERMISSIONS = [ChannelAPIKeyPermission, AllowAny]
+GUEST_PERMISSIONS = (ChannelAPIKeyPermission, AllowAny)
