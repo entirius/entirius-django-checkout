@@ -12,15 +12,17 @@ A code is unique per (channel, currency): creating a code, renaming one, or chan
 currencies into a clash is refused (``code_clashes``); a clash already stored keeps working.
 
 Raises:
-    ObjectDoesNotExist — resource missing or outside the channel (view -> 404).
+    DiscountObjectNotFound — resource missing or outside the channel (view -> 404).
     DiscountCodeClash — a ValueError naming the request field of the clashing code (view -> 400 on that field).
-    ValueError — invalid modifier/target/inclusion value (view -> 400).
+    InvalidDiscountInput — invalid modifier/target/inclusion value or bulk action (view -> 400).
+
+The not-found and invalid-input refusals are ``ClientError``s (still ``ObjectDoesNotExist`` / ``ValueError`` for
+direct callers): their message is written for the client, any other exception is not.
 """
 
 import logging
 import uuid as uuid_mod
 
-from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
 from django.db.models import Count, Q, QuerySet
 from django_accounts.models import Customer, Group
@@ -49,6 +51,7 @@ from django_checkout.schemas.requests.discount import (
     ProductFilterInput,
 )
 from django_checkout.services.code_clashes import Scope, refuse_clash, refuse_scope_change
+from django_checkout.services.exceptions import DiscountObjectNotFound, InvalidDiscountInput
 
 logger = logging.getLogger("checkout.discount_service")
 
@@ -146,11 +149,13 @@ def parse_bool(value: str | None) -> bool | None:
 
 def _validate_enums(*, modifier: str | None = None, target: str | None = None, inclusion: str | None = None) -> None:
     if modifier is not None and modifier not in _VALID_MODIFIERS:
-        raise ValueError(f"Invalid modifier '{modifier}'. Allowed: {sorted(_VALID_MODIFIERS)}")
+        raise InvalidDiscountInput(f"Invalid modifier '{modifier}'. Allowed: {sorted(_VALID_MODIFIERS)}")
     if target is not None and target not in _VALID_TARGETS:
-        raise ValueError(f"Invalid target '{target}'. Allowed: {sorted(_VALID_TARGETS)}")
+        raise InvalidDiscountInput(f"Invalid target '{target}'. Allowed: {sorted(_VALID_TARGETS)}")
     if inclusion is not None and inclusion not in _VALID_INCLUSION:
-        raise ValueError(f"Invalid is_inclusion_or_exclusion '{inclusion}'. Allowed: {sorted(_VALID_INCLUSION)}")
+        raise InvalidDiscountInput(
+            f"Invalid is_inclusion_or_exclusion '{inclusion}'. Allowed: {sorted(_VALID_INCLUSION)}"
+        )
 
 
 def _apply_scalars(obj, data, field_names: tuple[str, ...], *, partial: bool) -> None:
@@ -174,7 +179,7 @@ def _get_rule(channel: Channel, rule_id: int) -> DiscountRuleCode:
     try:
         return DiscountRuleCode.objects.prefetch_related(*_RULE_PREFETCH).get(pk=rule_id, channels=channel)
     except DiscountRuleCode.DoesNotExist as exc:
-        raise ObjectDoesNotExist(f"Discount rule {rule_id} not found in channel {channel.idx}") from exc
+        raise DiscountObjectNotFound(f"Discount rule {rule_id} not found in channel {channel.idx}") from exc
 
 
 # --- rule CRUD ---
@@ -301,7 +306,7 @@ def bulk_rules(channel: Channel, *, action: str, ids=None, all_matching: bool = 
     Channel-scoped: only rules belonging to this channel are touched. Returns the affected count.
     """
     if action not in _BULK_ACTIONS:
-        raise ValueError(f"Invalid action '{action}'. Allowed: {sorted(_BULK_ACTIONS)}")
+        raise InvalidDiscountInput(f"Invalid action '{action}'. Allowed: {sorted(_BULK_ACTIONS)}")
     if all_matching:
         base = list_rules(channel, params or {})
     elif ids:
@@ -385,7 +390,7 @@ def _get_code(rule: DiscountRuleCode, code_id: int) -> DiscountCode:
     try:
         return rule.codes.get(pk=code_id)
     except DiscountCode.DoesNotExist as exc:
-        raise ObjectDoesNotExist(f"Discount code {code_id} not found in rule {rule.pk}") from exc
+        raise DiscountObjectNotFound(f"Discount code {code_id} not found in rule {rule.pk}") from exc
 
 
 # --- product / threshold filter CRUD (shared shape) ---
@@ -427,7 +432,7 @@ def _get_filter(rule: DiscountRuleCode, filter_id: int, kind: str):
     try:
         return getattr(rule, relation).get(pk=filter_id)
     except model.DoesNotExist as exc:
-        raise ObjectDoesNotExist(f"{kind} filter {filter_id} not found in rule {rule.pk}") from exc
+        raise DiscountObjectNotFound(f"{kind} filter {filter_id} not found in rule {rule.pk}") from exc
 
 
 def _set_filter_m2m(filter_obj, channel: Channel, data: ProductFilterInput, *, partial: bool) -> None:
@@ -488,7 +493,7 @@ def _get_customer_filter(rule: DiscountRuleCode, filter_id: int) -> DiscountCust
     try:
         return rule.discount_customer_mode_of_actions_rule.get(pk=filter_id)
     except DiscountCustomerModeOfAction.DoesNotExist as exc:
-        raise ObjectDoesNotExist(f"Customer filter {filter_id} not found in rule {rule.pk}") from exc
+        raise DiscountObjectNotFound(f"Customer filter {filter_id} not found in rule {rule.pk}") from exc
 
 
 def _set_customer_m2m(filter_obj, data: CustomerFilterInput, *, partial: bool) -> None:
