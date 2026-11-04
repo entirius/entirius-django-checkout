@@ -22,6 +22,20 @@ def settling_payment_method(methods):
     return next((method for method in present if not is_voucher_method(method)), present[0] if present else None)
 
 
+def is_voucher_intent(intent) -> bool:
+    """A PaymentIntent is told apart by its method's provider; by its code once the method is gone (SET_NULL)."""
+    return PaymentProvider.is_voucher(getattr(intent.method, "provider", None), intent.code)
+
+
+def settling_payment_intent(intents):
+    """The intent of the method that settles what the vouchers leave: the first that is no voucher, else the first.
+
+    ``Order.create`` makes no gateway intent when the vouchers cover the order, so the voucher's is the one left.
+    """
+    present = list(intents)
+    return next((intent for intent in present if not is_voucher_intent(intent)), present[0] if present else None)
+
+
 def covered_by_vouchers(voucher_paid, amount_due) -> bool:
     """True when the vouchers leave nothing to pay: the other methods settle nothing and carry no fee."""
     return voucher_paid > 0 and amount_due <= 0

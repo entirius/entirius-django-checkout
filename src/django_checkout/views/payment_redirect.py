@@ -10,6 +10,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from django_checkout.domain.payment_redirect_target import is_allowed_bridge_target
+from django_checkout.domain.payment_selection import settling_payment_intent
 from django_checkout.models import PaymentRedirect
 
 
@@ -46,9 +47,9 @@ def payment_redirect_bridge(request, version, channel_idx, token):
     if not is_allowed_bridge_target(parsed):
         return HttpResponseNotFound("Redirect link invalid")
 
-    # Order & payment status for mobile app
+    # Order & payment status for mobile app: the payment the client was sent to make, not a voucher next to it
     order = redirect_obj.order
-    payment_intent = order.payment_items.first()
+    payment_intent = settling_payment_intent(order.payment_items.select_related("method").order_by("pk"))
     status_qs = {
         "order_id": order.pretty_id,
         "order_status": order.order_status,

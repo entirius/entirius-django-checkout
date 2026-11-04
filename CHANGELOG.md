@@ -113,6 +113,10 @@
   when the vouchers cover the whole cart no method settles anything, the cart drops the gateway and charges no fee
   (`[payu, voucher]` asked 2.00 at PayU for the fee alone). The v2 cart's `payment_method` is that method too, with
   its fee and `is_cash_on_delivery`; a cart with one method shows the same as before.
+- The payment bridge (`redirect/<token>/`) hands the mobile app the status of the payment the client was sent to
+  make (client-visible: `payment_status` in the app's return URL). It read the order's first payment, which for
+  `[voucher, gateway]` is the voucher, debited at order time: the app saw `complete` while the gateway was still
+  `pending`. When the vouchers cover the order it is the voucher's status, as before.
 - A cart is `valid` only with every `payment_method` entry valid, and product limits set for a shipping and payment
   method pair apply to each of the cart's methods (client-visible). Both read entry `[0]` only: `[payu, voucher]`
   with a voucher code refused as malformed stayed valid (`[voucher, payu]` did not), and a product limited for
