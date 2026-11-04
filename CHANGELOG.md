@@ -19,6 +19,9 @@
 - Paynow: notifications go through the same rules: a late or repeated status no longer pulls a COMPLETE payment
   back, re-confirms an order that moved on, or cancels an order confirmed by hand. BI finish tags keep their wording.
 
+- Paynow: `notify/paynow/` changes only a Paynow payment (another gateway's payment is answered 404, like any other
+  refused notification), and the `Signature` header is compared in constant time.
+
 ### Upgrade notes
 
 - **PayPal:** every PayPal payment method needs `webhook_id` (PayPal developer dashboard: the REST app, Webhooks,
