@@ -2002,4 +2002,7 @@ order an earlier one left half done. A pinned erase token covers its channel onl
 
 Names and free text become `x` of the same length, e-mails `x…x@example.com`. Not touched: invoices
 (`Invoice.invoice_base64`, kept for accounting), order attachments, shipping tracking numbers, `Order.extra`
-(integrator data), payment redirect links.
+(integrator data), payment redirect links. Orders erased by an earlier release kept the other fields: `manage.py
+complete-erasures` reports them (rows whose address e-mail is anonymised), `--apply` finishes them, and
+`--marker-domain <domain>` adds the domain an earlier release line anonymised e-mails to, for a database that came
+from one.

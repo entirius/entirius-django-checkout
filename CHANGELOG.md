@@ -80,7 +80,8 @@
   payments (`PaymentIntent.provider_request` / `provider_notify`: buyer, payer, shipping address), which keep only
   ids, amounts, currencies, statuses and timestamps. The intent's columns (amount, currency, external id, status)
   stay. The request also finds orders by those e-mail columns and by the e-mail a used code stored (the account
-  e-mail of a deleted account), so repeating it completes an order an earlier erasure left half done.
+  e-mail of a deleted account), so repeating it completes an order an earlier erasure left half done. New command
+  `complete-erasures` finishes the orders and carts erased before this release (dry run unless `--apply`).
 - Stripe: `notify/stripe/` stores the checkout session as plain JSON. With stripe 12 or later (the lock pins 15) a
   `StripeObject` is no dict, so saving it in `provider_notify` raised and every verified session event answered
   500 without changing the payment.

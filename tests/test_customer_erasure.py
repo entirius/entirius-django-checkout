@@ -19,8 +19,10 @@ Every personal value below is invented.
 """
 
 import json
+from io import StringIO
 
 import pytest
+from django.core.management import call_command
 from process_logger import ProcessLogger
 
 from django_checkout.enums import PaymentIntentStatus
@@ -547,3 +549,49 @@ def test_erasure_request_leaves_other_customers_alone(channel):
     assert other_intent.provider_request == PAYU[0]
     erased.refresh_from_db()
     assert erased.billing_email == ANONYMIZED_EMAIL
+
+
+# --- Backfill of orders erased before the fix -------------------------------------------------------------------
+
+
+def _complete_erasures(*args) -> str:
+    out = StringIO()
+    call_command("complete-erasures", *args, stdout=out)
+    return out.getvalue()
+
+
+@pytest.mark.django_db
+def test_complete_erasures_is_a_dry_run_by_default(half_anonymized_order):
+    output = _complete_erasures()
+
+    assert "orders 1, carts 0" in output
+    assert "1 still hold an e-mail" in output
+    assert EMAIL not in output
+    half_anonymized_order.refresh_from_db()
+    assert half_anonymized_order.billing_email == EMAIL
+    assert half_anonymized_order.payment_items.get().provider_request == PAYU[0]
+
+
+@pytest.mark.django_db
+def test_complete_erasures_apply_finishes_the_old_erasures_only(channel, half_anonymized_order):
+    old_line_marker = Order.objects.create(
+        channel=channel, order_body=_old_marker_body("xxxxxxxxxxxx@old-line.example"), billing_email=EMAIL
+    )
+    erased_cart = Cart.objects.create(channel=channel, cart_body=_old_marker_body())
+    untouched = _order(channel, email=OTHER_EMAIL)
+
+    assert "orders 1, carts 1" in _complete_erasures()  # the old line's marker only on request
+
+    output = _complete_erasures("--apply", "--marker-domain", "old-line.example")
+
+    assert "orders 2, carts 1, failed 0" in output
+    for order in (half_anonymized_order, old_line_marker):
+        order.refresh_from_db()
+        assert _leftovers([order.order_body, order.billing_email, order.shipping_email]) == []
+    intent = half_anonymized_order.payment_items.get()
+    assert _leftovers([intent.provider_request, intent.provider_notify]) == []
+    assert _leftovers([half_anonymized_order.used_coupons.get().billing_email]) == []
+    erased_cart.refresh_from_db()
+    assert _leftovers(erased_cart.cart_body) == []
+    untouched.refresh_from_db()
+    assert untouched.order_body == _body(OTHER_EMAIL)
