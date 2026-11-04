@@ -90,7 +90,11 @@ class CustomerService(ProcessLoggerMixin):
 
         Raises ``ErasureBlocked`` before anything is written while one of the orders is not settled yet.
         """
-        orders = list(_in_channel(_orders_of(email), channel))
+        orders = list(
+            _in_channel(_orders_of(email), channel)
+            .select_related("cart")
+            .prefetch_related("used_coupons", "payment_items")
+        )
         _refuse_unsettled(orders)
         erasure = _Erasure()
         for order in orders:

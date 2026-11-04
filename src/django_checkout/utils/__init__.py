@@ -5,6 +5,7 @@ from django_checkout.enums import PaymentProvider
 
 SECRET_PAYMENT_KEYS = ("card", "authorization_token", "continue_url")
 REDACTED = "***REDACTED***"
+ANONYMIZED_EMAIL_DOMAIN = "example.com"  # an anonymised e-mail is x…x@<this>
 
 
 def payment_entries(order_body: dict | None) -> list[dict]:
@@ -97,7 +98,7 @@ def anonymize(field, field_type):
         case "str":
             return field if not field else anonym_word * len(field)
         case "email":
-            return field if not field else f"{anonym_word * len(field.split('@')[0])}@example.com"
+            return field if not field else f"{anonym_word * len(field.split('@')[0])}@{ANONYMIZED_EMAIL_DOMAIN}"
         case _:
             raise Exception("Unknown field type")
 

@@ -9,11 +9,10 @@ from django.db.models import Q, QuerySet
 from process_logger import ProcessLogger
 
 from django_checkout.models import Cart, Order
+from django_checkout.utils import ANONYMIZED_EMAIL_DOMAIN as DEFAULT_MARKER_DOMAIN
 from django_checkout.utils.gateway_payload import scrub_gateway_payload
 
 logger_process = ProcessLogger("CHECKOUT_ERASURE")
-
-DEFAULT_MARKER_DOMAIN = "example.com"  # the domain anonymize() gives an e-mail
 
 
 def _marker(domains: list[str]) -> str:
