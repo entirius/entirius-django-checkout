@@ -341,9 +341,7 @@ class StripePaymentProvider(BasePaymentProvider, ProcessLoggerMixin):
             "metadata": {"channel": order.channel.idx, "order_idx": str(order.order_id)},
             "mode": "payment",
             "ui_mode": "hosted",
-            "success_url": self.resolve_continue_url(
-                order_dto.primary_payment_method.add_order_id_to_continue_url(order.pretty_id), order
-            ),
+            "success_url": self.resolve_own_continue_url(order, order_dto),
         }
 
         if use_automatic_tax:

@@ -24,7 +24,7 @@ from process_logger import ProcessLogger
 
 from django_checkout.domain.cart import process_cart
 from django_checkout.domain.dto.order import OrderParams, OrderRequest
-from django_checkout.domain.validators.order import OrderValidation
+from django_checkout.domain.validators.order import OrderValidation, refuse_voucher_on_split_order
 from django_checkout.enums import OrderStatus
 from django_checkout.models import (
     Cart,
@@ -107,6 +107,7 @@ def order_view(request, *args, **kwargs):
                 is_order_creation=True,
             )
             OrderValidation.validate(cart_id, processed_data)
+            refuse_voucher_on_split_order(message)
 
             # Splitting order
             items_to_split, len_parts = check_that_order_can_be_split(cart, request.channel)

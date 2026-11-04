@@ -133,6 +133,10 @@ toggles and defaults: `docs/configuration.md`.
   A pinned erase token anonymises only its channel's orders and carts (`erase_channel`); an unpinned one every channel.
 - Payment throttles (`utils/api/throttling.py`): the ident is DRF's `get_ident` when `NUM_PROXIES` is set, the TCP
   peer otherwise, plus the cart id where the request names one. Behind a proxy `NUM_PROXIES` must be set.
+- `payment_method` is a list (`[voucher, gateway]`): a provider reads its own entry (`own_payment_data`), never
+  `primary_payment_method`; which method settles the rest and that vouchers are debited first live in
+  `domain/payment_selection.py`. A voucher on a cart that splits is refused (`voucher_not_supported_on_split_order`):
+  split parts are created with the gateway alone.
 - PayU notifications need `second_key` in the method's `additional_data` (403 without it); `checks.py` reports
   PayU methods that lack it as `django_checkout.W001` (database-tagged: `manage.py check --database default`).
 - PayPal notifications need `webhook_id` in the method's `additional_data` and are verified by PayPal's

@@ -80,6 +80,31 @@
   total) goes into one `amount_off` coupon per session, single use, in the order's currency, on the payment method's
   account. A gift was charged its product's full price, and a voucher on top of the card. The coupon is named by
   `localized_names.discount` in the method's `additional_data` (default `Discount`).
+- A voucher on a cart that splits into several orders is refused (client-visible). The cart reports
+  `voucher_not_supported_on_split_order` (v2 `_errors` code `VOUCHER_NOT_SUPPORTED_ON_SPLIT_ORDER`, v1 `extra`
+  `split_parts`) and stays `invalid`; `POST orders/` refuses it with v2 409 and that `error`, v1 403 and that
+  `status`. Each part of a split is created with the gateway alone, so the voucher reached none of the parts: they
+  added up to the full amount and the voucher kept its balance. A split without a voucher and a voucher without a
+  split are not affected.
+- An order paid with a voucher and another method debits the voucher before any gateway is asked: with the gateway
+  listed first its session existed before the debit, and a debit that failed rolled the order back while the session
+  stayed payable. Cash on delivery and free order come from the method that pays the rest, not from entry `[0]`: a
+  voucher with cash on delivery left the order `unpaid` instead of `confirmed`. The free-order check of
+  `Order.create` reads that method too.
+- A gateway paid next to a voucher (`payment_method` `[voucher, gateway]`) reads its own entry of the list, not
+  entry `[0]`, which is the voucher's. PayU (`payu`, `payu_card`, `payu_blik`) and Stripe got no return URL
+  (`continueUrl`, `success_url`; Stripe refuses a session without one) and PayU card no card token. BLIK sent the
+  customer's BLIK code on no order, with or without a voucher: it looked for `pay_code` on the list itself. PayPal's
+  breakdown carries the voucher in `discount`: the amount is net of the voucher and the parts were not, so PayPal
+  refused the order.
+- `cheapest_gratis` and `most_expensive_gratis` give their discount (client-visible: cart totals drop). The rule's
+  units of the chosen item (`extra_value`, at most what the cart holds) come at the gift price, as a picked gift does
+  (`GRATIS_PERCENT_DISCOUNT` down to `GRATIS_PRICE`, or `GRATIS_PRICE` under `GRATIS_MECHANISM = 2`), never above
+  the item's own price; a channel that discounts net prices gets the same gift price. The discount was computed and
+  then overwritten with the item's earlier discount, so the code came out valid at 0. The item is picked by price
+  among the bought lines: a gift line, always the cheapest at the gift price, is never picked, and a line with more
+  units no longer wins over a cheaper (or dearer) one; quantity only breaks a price tie.
+
 - Merging a guest cart into the customer's cart no longer fails, v1 (`carts/{id}/merge/`) and v2
   (`POST carts/{id}/merge/`). `CartRequest.factory()` left out five fields the request requires
   (`custom_order_id`, `requested_delivery_date`, `split_order`, `affiliate_code`, `customer_ip`), so every merge
@@ -99,6 +124,9 @@
   the order. It answered 500 after the capture and saved nothing, so only the webhook confirmed PayPal orders.
 ### Added
 
+- Docs: `docs/api/checkout.md` (Code usage) says what an order that loses the race for a code's last use leaves
+  behind. It has already opened a payment session at the gateway when it rolls back; the customer never gets the
+  session, no money moves, and the gateway keeps it as an abandoned, unpaid session.
 - A discount code is unique per (channel, currency): two rules that share a channel and a currency (a rule
   without currencies holds every currency) may not hold the same code. The same code on rules of other channels
   or of other currencies stays allowed (`GRATIS_STEP` on an EUR and a PLN rule). Admin API v2 (client-visible

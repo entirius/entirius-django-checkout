@@ -14,7 +14,7 @@ from django.db.models import Q
 
 from django_checkout.domain.cart import process_cart
 from django_checkout.domain.dto.discount import DiscountsRejectedError
-from django_checkout.domain.validators.order import OrderValidation
+from django_checkout.domain.validators.order import OrderValidation, refuse_voucher_on_split_order
 from django_checkout.models import Cart, Order, OrderStatusLabel, PaymentMethod
 from django_checkout.schemas.common import format_money
 from django_checkout.services.discount_usage import DiscountCodeRefused, use_discounts
@@ -58,6 +58,7 @@ def create_order(
         is_order_creation=True,
     )
     OrderValidation.validate(cart_id, processed_data)
+    refuse_voucher_on_split_order(messages)
     _refuse_rejected_codes(messages)
 
     items_to_split, len_parts = check_that_order_can_be_split(cart, channel)

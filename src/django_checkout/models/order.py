@@ -17,6 +17,7 @@ from marshmallow import EXCLUDE
 
 from django_checkout.domain.dto.item import SkuQuantityData
 from django_checkout.domain.dto.order import OrderData
+from django_checkout.domain.payment_selection import settling_payment_method, vouchers_first
 from django_checkout.domain.product import fetch_products_feature, skus_have_attribute
 from django_checkout.enums import CartStatus, OrderStatus, PaymentProvider, ValidationStatus
 from django_checkout.models.item import Item
@@ -230,14 +231,16 @@ class Order(models.Model):
         # commit order to database
         else:
             with transaction.atomic():
-                is_cash_on_delivery = cart.selected_payment_method.is_cash_on_delivery
-                is_free_order = cart.selected_payment_method.is_free_order
+                # The method that settles the rest: entry [0] may be a voucher, which says nothing about it.
+                settling_method = settling_payment_method(cart.selected_payment_methods)
+                is_cash_on_delivery = settling_method.is_cash_on_delivery
+                is_free_order = settling_method.is_free_order
                 voucher_applied = Decimal(str(getattr(data.cart, "voucher_amount_applied", None) or 0))
                 remaining_to_pay = Decimal(str(getattr(data, "total", None) or 0))
                 fully_voucher_covered = voucher_applied > 0 and remaining_to_pay <= 0
                 from django_checkout.domain.validators.payment import free_order_with_amount_due
 
-                if free_order_with_amount_due([cart.selected_payment_method], remaining_to_pay):
+                if free_order_with_amount_due([settling_method], remaining_to_pay):
                     # The cart validation already refuses this; the order must not rely on it alone,
                     # since the methods are resolved from the stored cart body by code.
                     raise Exception(
@@ -420,10 +423,7 @@ class Order(models.Model):
                 redirect_url = None
                 payment_error = None
                 if process_payment:
-                    selected_methods = cart.selected_payment_methods or [cart.selected_payment_method]
-                    for method in selected_methods:
-                        if method is None:
-                            continue
+                    for method in vouchers_first(cart.selected_payment_methods):
                         if fully_voucher_covered and not _is_voucher_method(method, method.code):
                             continue
                         provider = method.get_provider()

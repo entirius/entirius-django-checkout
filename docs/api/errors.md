@@ -124,6 +124,7 @@
     {"status": "ADDRESSES_NOT_SELECTED", "message": "There is no addresses in this cart c230fc10-a122-42b1-9b1a-76e69dcb12e9"} status=403
     {"status": "SHIPPING_OPTION_NOT_SELECTED", "message": "There is no shipping method in this cart 0213cf48-906e-4512-aedf-3d2c15ac4f91"} status=403
     {"status": "PAYMENT_OPTION_NOT_SELECTED", "message": "There is no payment method in this cart 0213cf48-906e-4512-aedf-3d2c15ac4f91"} status=403
+    {"status": "VOUCHER_NOT_SUPPORTED_ON_SPLIT_ORDER", "message": "This cart splits into 2 orders and a voucher cannot pay for several orders. Remove the voucher, or the items that split the cart, to continue."} status=403
 
 ```
 
