@@ -9,6 +9,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from django_checkout.enums import ItemStatus
 from django_checkout.schemas.common import format_money, format_tax_rate
 from django_checkout.schemas.responses.address import AddressesResponse
 
@@ -359,12 +360,14 @@ class CartV2Response(BaseModel):
 
         # Compute net totals from gross
         # The subtotal is the items alone: `base_total` and `total_tax` also hold shipping and the payment fee.
+        # It is the valid items at catalogue price, and its net is their catalogue net: `cart.tax_amount` is the tax
+        # after special prices and discounts, so the gross minus it is neither net.
         items_total = cart.base_total_price if cart and cart.base_total_price is not None else checkout_data.base_total
         subtotal_gross = Decimal(str(items_total)) if items_total else Decimal("0")
-        items_tax = Decimal(str(cart.tax_amount)) if cart and cart.tax_amount else Decimal("0")
+        valid_nets = [Decimal(i.total_net) for i in items if i.status == ItemStatus.VALID.value and i.total_net]
         total = Decimal(str(checkout_data.total)) if checkout_data.total else Decimal("0")
         total_tax = Decimal(str(checkout_data.total_tax)) if checkout_data.total_tax else Decimal("0")
-        subtotal_net = subtotal_gross - items_tax if items_tax else None
+        subtotal_net = sum(valid_nets, Decimal("0")) if valid_nets else None
         total_net = total - total_tax if total_tax else None
 
         # Discount totals
