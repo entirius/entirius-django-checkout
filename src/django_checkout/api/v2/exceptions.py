@@ -5,6 +5,7 @@
 import uuid
 
 from pydantic import ValidationError as PydanticValidationError
+from rest_framework.exceptions import APIException
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.response import Response
 
@@ -48,6 +49,14 @@ def pydantic_error_response(exc: PydanticValidationError) -> Response:
         },
         status=400,
     )
+
+
+class CartNotReadyConflict(APIException):
+    """409: the cart cannot become an order yet; the code names the reason (``ADDRESSES_NOT_SELECTED``, ...)."""
+
+    status_code = 409
+    default_detail = "The cart cannot become an order yet."
+    default_code = "cart_not_ready"
 
 
 def _sanitize_pydantic_message(msg: str) -> str:

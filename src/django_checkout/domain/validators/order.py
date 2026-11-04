@@ -5,6 +5,10 @@
 from django_utils.api.exceptions import Forbidden
 
 
+class CartNotReady(Forbidden):
+    """The cart cannot become an order yet: no addresses, shipping or payment method, or an item out of stock."""
+
+
 class OrderValidation:
     @staticmethod
     def validate(cart, processed_data, *args, **kwargs):
@@ -39,6 +43,6 @@ class OrderValidation:
             message = f"There is no addresses in this cart {cart}"
 
         if flag:
-            raise Forbidden(message=message, status=status, data=data)
+            raise CartNotReady(message=message, status=status, data=data)
 
         return True
