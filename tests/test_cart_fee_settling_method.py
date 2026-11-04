@@ -127,6 +127,10 @@ def _cart(channel, shipping):
 def _pay(api_key, channel, record, *codes):
     """v1 PATCH with the payment list, as a storefront that pays with a voucher next to another method sends it."""
     entries = [{"code": code, "pay_code": "ENTGIFT1"} if code == "voucher" else {"code": code} for code in codes]
+    return _patch_payment(api_key, channel, record, entries)
+
+
+def _patch_payment(api_key, channel, record, entries):
     request = APIRequestFactory().patch(
         "/", json.dumps({"payment_method": entries}), content_type="application/json", HTTP_X_API_KEY=api_key.key
     )

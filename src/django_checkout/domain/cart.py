@@ -148,14 +148,9 @@ def process_cart(
         customer,
         cart_record=cart,
     )
-    # validate_payment_method always returns lists. Downstream code in this
-    # module currently operates on a single payment method (legacy). Unwrap
-    # to first item for backward compat — extend here when multi-method
-    # processing reaches discount/fee/order create paths below.
-    validated_payment = validated_payments[0] if validated_payments else None
-    payment_method = payment_methods[0] if payment_methods else None
-    # Cash on delivery and the fee belong to the method that settles what the vouchers leave, as in Order.create:
-    # entry [0] may be a voucher, which carries neither.
+    # validate_payment_method returns lists, in the order the client sent them: entry [0] may be a voucher. Cash on
+    # delivery and the fee belong to the method that settles what the vouchers leave, as in Order.create; the cart
+    # is valid only with every entry valid, and product limits apply to every method.
     settling_method = settling_payment_method(payment_methods)
     messages.extend(msgs)
 
@@ -178,7 +173,7 @@ def process_cart(
         validated_addresses,
         shipping_method,
         shipping_option,
-        payment_method,
+        payment_methods,
         checkout_data,
         customer=customer,
         split_order_data=split_order_data,
@@ -468,13 +463,13 @@ def process_cart(
             validated_cart_data.validation_status == ValidationStatus.VALID
             and validated_addresses is not None
             and validated_shipping is not None
-            and validated_payment is not None
+            and validated_payments
             and not split_parts
             and is_delivery_date_valid
             and not order_total_too_low
             and not voucher_coverage_insufficient
             and not free_order_amount_due
-            and get_item_list_status([validated_shipping, validated_payment]) == ValidationStatus.VALID
+            and get_item_list_status([validated_shipping, *validated_payments]) == ValidationStatus.VALID
         )
         else ValidationStatus.INVALID
     )

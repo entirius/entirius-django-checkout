@@ -79,6 +79,10 @@
   117.00, and `Order.create` already confirmed it as cash on delivery. A gateway's fee is charged in either order;
   when the vouchers cover the whole cart no method settles anything, the cart drops the gateway and charges no fee
   (`[payu, voucher]` asked 2.00 at PayU for the fee alone).
+- A cart is `valid` only with every `payment_method` entry valid, and product limits set for a shipping and payment
+  method pair apply to each of the cart's methods (client-visible). Both read entry `[0]` only: `[payu, voucher]`
+  with a voucher code refused as malformed stayed valid (`[voucher, payu]` did not), and a product limited for
+  courier with cash on delivery went through as `[voucher, cod]`.
 - Stripe: a line of several units with a cart discount is charged its discounted total. Its `unit_amount` was the
   unit price less the discount of the whole line, and Stripe multiplies `unit_amount` by the quantity: 3 x 54.99 at
   15 % off charged 90.72 instead of 140.22, and a large discount sent a negative amount Stripe refused. Lines carry
