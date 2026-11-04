@@ -63,7 +63,8 @@
   shop.
 - **Customer erasure:** `DELETE customer/delete` answers 409 `OPEN_ORDERS` (and the Python API raises
   `django_checkout.output.admin.ErasureBlocked`) while the customer has an order that is not `complete`, `returned`
-  or `canceled`. A caller that erases on request has to ship or cancel those orders first and repeat the request.
+  or `canceled`. A caller that erases on request has to cancel or finish those orders first and repeat the request;
+  nothing cancels an abandoned unpaid order by itself.
   Erase in checkout before deleting the account in django-accounts: afterwards checkout finds orders only by the
   e-mails they hold.
 

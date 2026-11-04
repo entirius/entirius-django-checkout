@@ -2030,13 +2030,16 @@ not that order, not the customer's other orders, not the carts. A pinned token l
 v1 answers 409 with the blocking orders' ids, numbers and statuses, never the e-mail or any other personal value:
 
 ```json
-{"meta": {"status": "OPEN_ORDERS", "message": "The customer has orders that are not fulfilled yet; nothing was anonymized", ...},
+{"meta": {"status": "OPEN_ORDERS", "message": "The customer has orders that are not fulfilled yet; nothing was anonymized. Cancel or finish the listed orders, then erase again", ...},
  "data": {"deleted": false, "blocking_orders": [{"order_id": "<uuid>", "pretty_id": "0100000042", "status": "confirmed"}]}}
 ```
 
 The Python API raises `django_checkout.output.admin.ErasureBlocked` instead; its `orders` holds the same
-`BlockingOrder(order_id, pretty_id, status)` entries. Ship or cancel the orders (an abandoned unpaid order: cancel it in
-the CMS or with `POST /api/checkout/v2/admin/{channel}/orders/{uid}/cancel/`), then repeat the request. One
+`BlockingOrder(order_id, pretty_id, status)` entries.
+
+To erase the customer, cancel or finish (ship and complete) every listed order, then send the request again.
+Nothing cancels an order by itself: an abandoned order that waits for payment stays `unpaid` and refuses every
+erasure until someone cancels it, in the CMS or with `POST /api/checkout/v2/admin/{channel}/orders/{uid}/cancel/`. One
 gap stays: a cancelled order whose payment still arrives is confirmed again (logged CRITICAL for manual review,
 `notification_state.confirm_order`); erased in between, it has no address left to ship to.
 

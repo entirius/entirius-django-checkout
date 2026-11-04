@@ -711,6 +711,7 @@ def test_erase_view_answers_409_naming_the_open_orders_and_nothing_personal(chan
     assert response.status_code == 409
     body = json.loads(response.content)
     assert body["meta"]["status"] == "OPEN_ORDERS"
+    assert "Cancel or finish the listed orders, then erase again" in body["meta"]["message"]
     assert body["data"] == {
         "deleted": False,
         "blocking_orders": [{"order_id": str(order.order_id), "pretty_id": order.pretty_id, "status": "confirmed"}],

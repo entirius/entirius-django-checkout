@@ -134,7 +134,7 @@
 
 ```
     {"status": "BAD_REQUEST", "message": "Email is required"} status=400
-    {"status": "OPEN_ORDERS", "message": "The customer has orders that are not fulfilled yet; nothing was anonymized"} status=409
+    {"status": "OPEN_ORDERS", "message": "The customer has orders that are not fulfilled yet; nothing was anonymized. Cancel or finish the listed orders, then erase again"} status=409
         data: {"deleted": false, "blocking_orders": [{"order_id": "<uuid>", "pretty_id": "0100000042", "status": "confirmed"}]}
     {"status": "NOT_FOUND", "message": "No data found for this customer"} status=404
     {"status": "BAD_REQUEST", "message": "Customer data in orders anonymization failed"} status=400
