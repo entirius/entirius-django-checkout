@@ -741,7 +741,7 @@ wheels = [
 
 [[package]]
 name = "entirius-django-checkout"
-version = "10.1.0"
+version = "10.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "celery" },
