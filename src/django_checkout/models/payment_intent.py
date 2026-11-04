@@ -49,23 +49,30 @@ class PaymentIntent(models.Model):
                 setattr(self, name, scrub_gateway_payload(getattr(self, name)))
         super().save(*args, **kwargs)
 
+    def reduce_payloads(self) -> list[str]:
+        """Put the payloads through the allowlist on the instance (not saved); the names of the ones that changed."""
+        changed = []
+        for name in PAYLOAD_FIELDS:
+            stored = getattr(self, name)
+            if (reduced := scrub_gateway_payload(stored)) != stored:
+                setattr(self, name, reduced)
+                changed.append(name)
+        return changed
+
     def anonymize(self) -> bool:
         """Reduce payloads stored before ``save()`` scrubbed them and redact the payment link; True if either changed.
 
-        The link is the gateway's payment page or, for BLIK, a copy of the body's
-        ``continue_url`` (redacted with the body); only the order's creation answer hands it out. The columns
-        (amount, currency, external_order_id, payment_status, code) stay: accounting needs them.
+        The link is the gateway's payment page or, for BLIK, a copy of the body's ``continue_url`` (redacted with the
+        body); only the order's creation answer hands it out. The columns (amount, currency, external_order_id,
+        payment_status, code) stay: accounting needs them.
         """
-        holds_link = bool(self.redirect_url) and self.redirect_url != REDACTED
-        payloads_drop = any(
-            scrub_gateway_payload(getattr(self, name)) != getattr(self, name) for name in PAYLOAD_FIELDS
-        )
-        if not (holds_link or payloads_drop):
-            return False
-        if holds_link:
+        changed = self.reduce_payloads()
+        if self.redirect_url and self.redirect_url != REDACTED:
             self.redirect_url = REDACTED
-        self.save(update_fields=[*PAYLOAD_FIELDS, "redirect_url"])  # save() scrubs the payloads
-        return True
+            changed.append("redirect_url")
+        if changed:
+            self.save(update_fields=changed)
+        return bool(changed)
 
 
 #

@@ -24,7 +24,7 @@ from types import SimpleNamespace
 
 import pytest
 from autopay_sdk.dto.order import Order as AutopayOrder
-from django.core.management import call_command
+from django.core.management import CommandError, call_command
 from django.test import RequestFactory
 
 from django_checkout.domain.payment_provider.autopay_payment_provider import AutopayPaymentProvider
@@ -385,7 +385,7 @@ def test_scrub_gateway_payloads_is_a_dry_run_by_default(channel):
 
 @pytest.mark.django_db
 def test_scrub_gateway_payloads_apply_reduces_them_in_batches_once(channel, monkeypatch):
-    legacy = [_legacy(channel) for _ in range(5)]
+    legacy = [_legacy(channel) for _ in range(4)] + [_legacy(channel, notify=f"<itn><email>{EMAIL}</email></itn>")]
     batches = []
     bulk_update = PaymentIntent.objects.bulk_update
     monkeypatch.setattr(
@@ -402,5 +402,36 @@ def test_scrub_gateway_payloads_apply_reduces_them_in_batches_once(channel, monk
         intent.refresh_from_db()
         assert _leftovers(intent.provider_request, intent.provider_notify) == []
         assert intent.provider_request == {"extOrderId": "25-000009", "totalAmount": "100"}
-        assert intent.provider_notify == {"order": {"orderId": "PAYU-OLD", "status": "COMPLETED"}}
+    assert [intent.provider_notify for intent in legacy] == [
+        {"order": {"orderId": "PAYU-OLD", "status": "COMPLETED"}}
+    ] * 4 + [None]  # a raw string is no JSON object: not kept
     assert "5; 0 hold data the allowlist drops" in _scrub_gateway_payloads()  # idempotent
+
+
+@pytest.mark.django_db
+def test_scrub_gateway_payloads_does_not_write_over_a_payment_saved_meanwhile(channel, monkeypatch):
+    """The scan reads a snapshot; a notification saved after it must survive the write."""
+    from importlib import import_module
+
+    command = import_module("django_checkout.management.commands.scrub-gateway-payloads")
+    intent = _legacy(channel)
+    reduce_locked = command._reduce_locked
+
+    def notification_first(pks):
+        fresh = PaymentIntent.objects.get(pk=intent.pk)
+        fresh.provider_notify = {"order": {"orderId": "PAYU-OLD", "status": "CANCELED", "buyer": {"email": EMAIL}}}
+        fresh.save()
+        return reduce_locked(pks)
+
+    monkeypatch.setattr(command, "_reduce_locked", notification_first)
+
+    _scrub_gateway_payloads("--apply")
+
+    intent.refresh_from_db()
+    assert intent.provider_notify == {"order": {"orderId": "PAYU-OLD", "status": "CANCELED"}}
+    assert intent.provider_request == {"extOrderId": "25-000009", "totalAmount": "100"}
+
+
+def test_scrub_gateway_payloads_refuses_a_batch_size_below_one():
+    with pytest.raises(CommandError, match="at least 1"):
+        _scrub_gateway_payloads("--batch-size", "0")

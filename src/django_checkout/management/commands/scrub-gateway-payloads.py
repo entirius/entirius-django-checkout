@@ -2,25 +2,27 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
+from django.db import transaction
 from process_logger import ProcessLogger
 
 from django_checkout.models import PaymentIntent
 from django_checkout.models.payment_intent import PAYLOAD_FIELDS
-from django_checkout.utils.gateway_payload import scrub_gateway_payload
 
 logger_process = ProcessLogger("CHECKOUT_GATEWAY_PAYLOADS")
 
 
-def _reduce(payment: PaymentIntent) -> bool:
-    """Put the payment's payloads through the allowlist on the instance; True if that changed one of them."""
-    changed = False
-    for name in PAYLOAD_FIELDS:
-        stored = getattr(payment, name)
-        if (scrubbed := scrub_gateway_payload(stored)) != stored:
-            setattr(payment, name, scrubbed)
-            changed = True
-    return changed
+def _reduce_locked(pks: list[int]) -> int:
+    """Re-read the payments under a row lock and write what the allowlist drops; how many changed.
+
+    The scan reads a snapshot: a notification may have saved a payment since, and this must not write over it.
+    """
+    with transaction.atomic():
+        payments = PaymentIntent.objects.select_for_update().filter(pk__in=pks).only("pk", *PAYLOAD_FIELDS)
+        changed = [payment for payment in payments if payment.reduce_payloads()]
+        # bulk_update skips save(): the payloads on the instances are already reduced.
+        PaymentIntent.objects.bulk_update(changed, PAYLOAD_FIELDS)
+    return len(changed)
 
 
 class Command(BaseCommand):
@@ -35,28 +37,29 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         batch_size = options["batch_size"]
+        if batch_size < 1:
+            raise CommandError("--batch-size must be at least 1")
         payments = (
             PaymentIntent.objects.exclude(provider_request__isnull=True, provider_notify__isnull=True)
             .only("pk", *PAYLOAD_FIELDS)
             .order_by("pk")
         )
-        scanned, reduced, batch = 0, 0, []
+        scanned, found, written, batch = 0, 0, 0, []
         for payment in payments.iterator(chunk_size=batch_size):
             scanned += 1
-            if _reduce(payment):
-                reduced += 1
-                batch.append(payment)
-            if len(batch) >= batch_size:
-                self._flush(batch, options["apply"])
+            if not payment.reduce_payloads():
+                continue
+            found += 1
+            batch.append(payment.pk)
+            if len(batch) == batch_size:
+                written += self._flush(batch, options["apply"])
                 batch = []
-        self._flush(batch, options["apply"])
-        self._report(scanned, reduced, options["apply"])
+        written += self._flush(batch, options["apply"])
+        self._report(scanned, written if options["apply"] else found, options["apply"])
 
     @staticmethod
-    def _flush(batch: list[PaymentIntent], apply: bool) -> None:
-        # bulk_update skips save(): the payloads on the instances are already reduced.
-        if apply and batch:
-            PaymentIntent.objects.bulk_update(batch, PAYLOAD_FIELDS)
+    def _flush(pks: list[int], apply: bool) -> int:
+        return _reduce_locked(pks) if apply and pks else 0
 
     def _report(self, scanned: int, reduced: int, applied: bool) -> None:
         if applied:
