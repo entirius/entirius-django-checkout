@@ -2,6 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+import json
 from dataclasses import dataclass, field
 
 from django.db.models import Q, QuerySet
@@ -60,6 +61,11 @@ def _refuse_unsettled(orders: list[Order]) -> None:
         raise ErasureBlocked(blocking)
 
 
+def _in_body(email: str) -> str:
+    """``email`` as a JSON string value: a body matches the whole address, never one that merely contains it."""
+    return json.dumps(email, ensure_ascii=False)
+
+
 def _orders_of(email: str) -> QuerySet:
     """Orders holding ``email`` anywhere checkout keeps it.
 
@@ -72,7 +78,7 @@ def _orders_of(email: str) -> QuerySet:
         | Q(billing_email__iexact=email)
         | Q(shipping_email__iexact=email)
         | Q(pk__in=used_codes.values("order_id"))
-        | Q(order_body__icontains=email)
+        | Q(order_body__icontains=_in_body(email))
     )
 
 
@@ -90,7 +96,7 @@ class CustomerService(ProcessLoggerMixin):
         for order in orders:
             if self._anonymize_order(order, erasure) and order.cart is not None:
                 self._anonymize_cart(order.cart, erasure)
-        carts = Cart.objects.filter(Q(customer__user__email=email) | Q(cart_body__icontains=email))
+        carts = Cart.objects.filter(Q(customer__user__email=email) | Q(cart_body__icontains=_in_body(email)))
         for cart in _in_channel(carts, channel):
             self._anonymize_cart(cart, erasure)
         self._notify(email, erasure, channel)

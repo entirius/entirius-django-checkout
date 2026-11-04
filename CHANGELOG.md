@@ -79,6 +79,9 @@
   already redacted) becomes `***REDACTED***`, so a link still open answers 404. The request also finds orders by those e-mail columns and by the e-mail a used code stored (the account
   e-mail of a deleted account), so repeating it completes an order an earlier erasure left half done. New command
   `complete-erasures` finishes the orders and carts erased before this release (dry run unless `--apply`).
+- Customer erasure no longer anonymises another customer whose e-mail contains the erased one: `order_body` and
+  `cart_body` were searched for the e-mail as a substring, so erasing `anna@example.org` also anonymised the orders
+  and carts of `joanna@example.org`. The bodies now match the whole address (case-insensitive), as the columns do.
 - Log lines and BI events no longer carry a customer's personal data. The admin order preview (v2
   `GET admin/{channel}/orders/{uid}/`) logged the billing e-mail and now logs the order id; the PayU, PayPal and
   Stripe notification views logged and sent to BI the whole notification (buyer, payer, `customer_details`) and now

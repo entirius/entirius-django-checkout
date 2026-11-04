@@ -1997,7 +1997,8 @@ and a notification the gateway may still send for that session finds no payment 
 `checkout.erase`; `django_checkout.output.admin.admin_customer_delete` is the same for Python callers) anonymises
 the orders and carts of that e-mail. It finds an order by the customer account, by the `billing_email` /
 `shipping_email` columns, by the e-mail a used code stored and by `order_body`, so a repeated request completes an
-order an earlier one left half done. A pinned erase token covers its channel only.
+order an earlier one left half done. Every match is the whole address, case aside: erasing `anna@example.org` leaves
+`joanna@example.org` alone. A pinned erase token covers its channel only.
 
 | Where | Anonymised | Kept |
 |---|---|---|

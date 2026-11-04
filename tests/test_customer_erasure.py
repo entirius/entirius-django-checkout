@@ -594,6 +594,24 @@ def test_erasure_request_leaves_other_customers_alone(channel):
     assert erased.billing_email == ANONYMIZED_EMAIL
 
 
+@pytest.mark.django_db
+def test_erasure_request_leaves_an_email_that_merely_contains_the_erased_one(channel):
+    """``jo`` + the erased address is another customer: the body matches the whole JSON string, not a substring."""
+    longer = f"jo{EMAIL}"
+    other_order = _order(channel, email=longer)
+    other_order.billing_email = other_order.shipping_email = None  # found by its body only
+    other_order.save()
+    other_cart = Cart.objects.create(channel=channel, cart_body=_body(longer))
+
+    success, orders_idxs, carts_idxs, *_ = _erase(EMAIL)
+
+    assert (success, orders_idxs, carts_idxs) == (True, [], [])
+    other_order.refresh_from_db()
+    other_cart.refresh_from_db()
+    assert other_order.order_body == _body(longer)
+    assert other_cart.cart_body == _body(longer)
+
+
 # --- Orders the shop still has to fulfil refuse the erasure ------------------------------------------------------
 
 OPEN_STATUSES = [
