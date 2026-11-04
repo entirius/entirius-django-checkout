@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- A v1 order with a code that sits on more than one rule (one code on an EUR and a PLN rule, as `GRATIS_STEP` in
+  the test package, or the same code in another channel) no longer fails after the order is saved. `use_discounts`
+  looked the code up by its text alone and raised `MultipleObjectsReturned`, so the customer got 403
+  `INVALID_REQUEST` for an order that existed. The usage now counts on the code row the cart applied: a rule of the
+  order's channel and currency (or of none), of the same kind (typed or automatic) and modifier, lowest pk on a tie.
 - A discount rule limited to some currencies (`currencies`) applies only to carts in one of them; a rule with none
   applies in every currency, as before. Only the gratis offer list read the field, so a PLN-only automatic rule
   discounted an EUR cart, a PLN-only rule could win priority arbitration on an EUR cart and block its codes, and a

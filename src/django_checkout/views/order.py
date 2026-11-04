@@ -410,6 +410,25 @@ def get_order_attachment(request, channel_idx=None, order_id=None, file_id=None,
     raise NotFound(message="File does't exists", status="file_doesnt_exists")
 
 
+def _applied_code(discount: dict, channel, currency: str | None) -> DiscountCode | None:
+    """The code row the cart applied ``discount`` from.
+
+    A code is not unique: one code may sit on an EUR and a PLN rule, or in another channel. The cart applied it from
+    a rule of this channel, of its currency (or of none), of the same kind (typed or automatic) and modifier; of rows
+    that still tie, the lowest pk, as ``validate_discounts`` picks.
+    """
+    rows = DiscountCode.objects.filter(
+        code=discount["code"],
+        rule__channels=channel,
+        rule__automatic_applications=bool(discount.get("is_automatic")),
+    )
+    if currency:
+        rows = rows.filter(Q(rule__currencies__isnull=True) | Q(rule__currencies__iso3=currency.upper()))
+    if discount.get("modifier"):
+        rows = rows.filter(rule__modifier=discount["modifier"])
+    return rows.order_by("pk").first()
+
+
 def use_discounts(discounts: list, channel, order=None):
     """
     Zwiększa licznik użyć kodów rabatowych i zapisuje użycie w tabeli UsedCoupon.
@@ -421,18 +440,17 @@ def use_discounts(discounts: list, channel, order=None):
     """
     from django_checkout.models import UsedCoupon
 
+    currency = order.order_body.get("currency_code") if order else None
     for discount in discounts:
         code = discount.get("code")
         if not code:
             continue
 
-        try:
-            discount_code_obj = DiscountCode.objects.get(code=code)
+        discount_code_obj = _applied_code(discount, channel, currency)
+        # None: an automatic rule without codes stands in the cart under its name and has no usage count
+        if discount_code_obj is not None:
             discount_code_obj.current_used = F("current_used") + 1
             discount_code_obj.save()
-        except DiscountCode.DoesNotExist:
-            # nie dodawaj, bo jest to kod automatyczny, który nie ma ilość użyć
-            pass
 
         if order:
             billing_email = order.billing_email
