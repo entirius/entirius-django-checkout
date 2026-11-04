@@ -137,3 +137,6 @@ toggles and defaults: `docs/configuration.md`.
 - PayPal notifications need `webhook_id` in the method's `additional_data` and are verified by PayPal's
   verify-webhook-signature postback (403 without the id, on a failed or unreachable check, or for a non-PayPal
   payment); `checks.py` reports PayPal methods that lack it as `django_checkout.W002`.
+- Gateway statuses go through `domain/payment_provider/notification_state.py` (`apply_payment_status` under
+  `lock_payment_intent`): COMPLETE is final, CANCELLED yields only to COMPLETE, orders are confirmed / cancelled only
+  while they await payment. BI finish tags are grouped on in reports: keep their wording (`describe`).

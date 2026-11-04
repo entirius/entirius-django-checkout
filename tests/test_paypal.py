@@ -4,6 +4,9 @@
 
 """PayPal endpoints: the buyer's return, the cancel return and the webhook.
 
+A status, verified or read from PayPal, only moves a payment forward
+(``domain/payment_provider/notification_state.py``), and the cancel return only cancels.
+
 A webhook changes a payment only when it is for a PayPal payment, the payment method carries the
 ``webhook_id`` PayPal shows for the webhook, and PayPal confirms the signature. Anything else is a
 403 with nothing written. Non-200 on purpose: PayPal redelivers until it gets a 2xx, so a genuine
@@ -23,7 +26,7 @@ from django.test import RequestFactory
 from django_checkout.enums import OrderStatus, PaymentIntentStatus, PaymentProvider
 from django_checkout.models import Order, PaymentIntent, PaymentMethod
 from django_checkout.views.payment_provider import paypal as paypal_views
-from django_checkout.views.payment_provider.paypal import paypal_notify, paypal_return
+from django_checkout.views.payment_provider.paypal import paypal_cancel, paypal_notify, paypal_return
 
 factory = RequestFactory()
 
@@ -413,3 +416,167 @@ def test_return_captures_and_confirms_the_order(paypal_intent, paypal):
     assert response.status_code == 200
     assert len(paypal.captures) == 1
     assert _state(paypal_intent) == (PaymentIntentStatus.COMPLETE, OrderStatus.CONFIRMED)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "body",
+    [_capture_completed(), _order_event("APPROVED"), _order_event("VOIDED")],
+    ids=["capture-completed", "order-approved", "order-voided"],
+)
+def test_late_event_leaves_a_completed_payment_alone(paypal_intent, paypal, body):
+    """Once the payment is COMPLETE, a redelivered event neither re-confirms, captures again nor cancels."""
+    _set_state(paypal_intent, PaymentIntentStatus.COMPLETE, OrderStatus.IN_PROGRESS)
+
+    response = _notify(body, TRANSMISSION)
+
+    assert response.status_code == 200
+    assert _state(paypal_intent) == (PaymentIntentStatus.COMPLETE, OrderStatus.IN_PROGRESS)
+    assert len(paypal.verifications) == 1
+    assert paypal.captures == []
+
+
+# --- A status only moves a payment forward ------------------------------------------------
+
+
+def _set_state(payment_intent, payment_status, order_status):
+    PaymentIntent.objects.filter(pk=payment_intent.pk).update(payment_status=payment_status)
+    Order.objects.filter(pk=payment_intent.order_id).update(order_status=order_status)
+
+
+def _cancel_return():
+    return paypal_cancel(factory.get("/cancel/paypal/", {"token": PAYPAL_ORDER_ID}))
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("paypal_status", ["COMPLETED", "APPROVED"])
+def test_cancel_return_never_confirms_or_captures(paypal_intent, paypal, paypal_status):
+    """The cancel return reads the status from PayPal, and it may be repeated."""
+    paypal.order_status = paypal_status
+
+    response = _cancel_return()
+
+    assert response.status_code == 200
+    assert _state(paypal_intent) == UNTOUCHED
+    assert paypal.captures == []
+
+
+@pytest.mark.django_db
+def test_cancel_return_cannot_reconfirm_a_returned_order(paypal_intent, paypal):
+    """A refund leaves the PayPal order COMPLETED."""
+    _set_state(paypal_intent, PaymentIntentStatus.COMPLETE, OrderStatus.RETURNED)
+    paypal.order_status = "COMPLETED"
+
+    _cancel_return()
+
+    assert _state(paypal_intent) == (PaymentIntentStatus.COMPLETE, OrderStatus.RETURNED)
+
+
+@pytest.mark.django_db
+def test_cancel_return_cancels_an_order_still_waiting_for_payment(paypal_intent, paypal):
+    paypal.order_status = "VOIDED"
+
+    response = _cancel_return()
+
+    assert response.status_code == 200
+    assert _state(paypal_intent) == (PaymentIntentStatus.CANCELLED, OrderStatus.CANCELED)
+
+
+@pytest.mark.django_db
+def test_return_cannot_reconfirm_an_order_that_moved_on(paypal_intent, paypal):
+    _set_state(paypal_intent, PaymentIntentStatus.COMPLETE, OrderStatus.COMPLETED)
+
+    _buyer_return()
+
+    assert _state(paypal_intent) == (PaymentIntentStatus.COMPLETE, OrderStatus.COMPLETED)
+
+
+@pytest.mark.django_db
+def test_voided_leaves_an_order_confirmed_by_hand(paypal_intent):
+    _set_state(paypal_intent, PaymentIntentStatus.PENDING, OrderStatus.CONFIRMED)
+
+    _notify(_order_event("VOIDED"), TRANSMISSION)
+
+    assert _state(paypal_intent) == (PaymentIntentStatus.CANCELLED, OrderStatus.CONFIRMED)
+
+
+@pytest.mark.django_db
+def test_completed_payment_keeps_an_order_that_moved_on(paypal_intent):
+    _set_state(paypal_intent, PaymentIntentStatus.PENDING, OrderStatus.IN_PROGRESS)
+
+    _notify(_capture_completed(), TRANSMISSION)
+
+    assert _state(paypal_intent) == (PaymentIntentStatus.COMPLETE, OrderStatus.IN_PROGRESS)
+
+
+@pytest.mark.django_db
+def test_payment_completed_after_cancellation_confirms_the_order(paypal_intent):
+    """Paid wins over an earlier cancellation (logged for review: the stock reservation is gone)."""
+    _set_state(paypal_intent, PaymentIntentStatus.CANCELLED, OrderStatus.CANCELED)
+
+    _notify(_capture_completed(), TRANSMISSION)
+
+    assert _state(paypal_intent) == (PaymentIntentStatus.COMPLETE, OrderStatus.CONFIRMED)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("paypal_status", ["CREATED", "APPROVED", "SAVED"])
+def test_cancelled_payment_ignores_anything_but_completion(paypal_intent, paypal, paypal_status):
+    _set_state(paypal_intent, PaymentIntentStatus.CANCELLED, OrderStatus.CANCELED)
+
+    response = _notify(_order_event(paypal_status), TRANSMISSION)
+
+    assert response.status_code == 200
+    assert _state(paypal_intent) == (PaymentIntentStatus.CANCELLED, OrderStatus.CANCELED)
+    assert paypal.captures == []
+
+
+@pytest.mark.django_db
+def test_unknown_status_cannot_overwrite_a_completed_payment(paypal_intent):
+    _set_state(paypal_intent, PaymentIntentStatus.COMPLETE, OrderStatus.CONFIRMED)
+
+    _notify(_order_event("SAVED"), TRANSMISSION)
+
+    assert _state(paypal_intent) == (PaymentIntentStatus.COMPLETE, OrderStatus.CONFIRMED)
+
+
+@pytest.mark.django_db
+def test_approved_order_is_captured(paypal_intent, paypal):
+    """The capture runs outside the row lock; it must still happen."""
+    _notify(_order_event("APPROVED"), TRANSMISSION)
+
+    assert _state(paypal_intent) == (PaymentIntentStatus.APPROVED, OrderStatus.UNPAID)
+    assert len(paypal.captures) == 1
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "body,finish_tag",
+    [
+        (_capture_completed(), "PaymentIntent status is set to COMPLETE, Order status is set to CONFIRMED"),
+        (_order_event("VOIDED"), "PaymentIntent status is set to CANCELED"),
+        (_order_event("APPROVED"), "PaymentIntent status is set to APPROVED"),
+        (_order_event("CREATED"), "PaymentIntent status is set to PENDING"),
+        (_order_event("SAVED"), "Unsupported PayPal payment_status"),
+    ],
+    ids=["completed", "voided", "approved", "created", "unsupported"],
+)
+def test_bi_finish_tags_keep_their_wording(paypal_intent, monkeypatch, body, finish_tag):
+    """BI reports group notifications by finish tag; the state rules must not rename them."""
+    tags = []
+
+    class RecordingEvent:
+        def __init__(self, **kwargs):
+            pass
+
+        def finish_with_success(self, finish_tag, details=None):
+            tags.append(finish_tag)
+
+        def finish_with_error(self, finish_tag, details=None, error_message=None):
+            tags.append(finish_tag)
+
+    monkeypatch.setattr(paypal_views, "Checkout_PayPalNotifyEvent", RecordingEvent)
+
+    _notify(body, TRANSMISSION)
+
+    assert tags == [finish_tag]

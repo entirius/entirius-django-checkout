@@ -9,6 +9,13 @@
   belongs to a PayPal payment method. Anything else is answered 403 and writes nothing; PayPal redelivers it. The
   verification calls PayPal with a 10 s timeout. `django_checkout.W002` (`manage.py check --database default`)
   lists PayPal methods without `webhook_id`.
+- PayPal: the webhook, the buyer's return and the cancel return only move a payment forward. A COMPLETE payment
+  stays final, a CANCELLED one gives way only to a completed payment; an order is confirmed only while it waits for
+  payment (or after a cancellation: logged for manual review, its stock reservation is gone) and cancelled only while
+  it waits for payment. Statuses are applied under a row lock on the payment and its order. The cancel return
+  records a cancellation only: for an approved or completed PayPal order it changes nothing and captures nothing.
+  BI finish tags keep their wording; new outcomes add their own (`..., Order status <status> kept`,
+  `PaymentIntent is already <status>, <status> ignored`).
 
 ### Upgrade notes
 
