@@ -61,6 +61,11 @@ def _with_related(orders):
     )
 
 
+def _customer_ref(customer) -> int | None:
+    """The customer in a log line: the pk, since ``str(customer)`` is the username, which is the e-mail."""
+    return customer.pk if customer is not None else None
+
+
 @csrf_exempt
 @channel_view
 @require_http_method("POST", "GET")
@@ -78,16 +83,16 @@ def order_view(request, *args, **kwargs):
             cart_id = body.cart_id
             cart = Cart.objects.get(channel=request.channel, cart_id=body.cart_id, customer=customer)
         except ObjectDoesNotExist as e:
-            extra = {"request_body": str(body), "error_message": str(e), "customer": str(customer)}
+            extra = {"request_body": str(body), "error_message": str(e), "customer": _customer_ref(customer)}
             logger_process.add_log_param_once("request_body", str(body))
-            logger_process.add_log_param_once("customer", str(customer))
+            logger_process.add_log_param_once("customer", _customer_ref(customer))
             logger_process.error("Order creation failed: cart does not exist.")
             bev.finish_with_error(finish_tag="Order creation failed: cart does not exist.", details=extra)
             raise BadRequest("Cart does not exist")
         except Exception as e:
-            extra = {"request_body": str(body), "error_message": str(e), "customer": str(customer)}
+            extra = {"request_body": str(body), "error_message": str(e), "customer": _customer_ref(customer)}
             logger_process.add_log_param_once("request_body", str(body))
-            logger_process.add_log_param_once("customer", str(customer))
+            logger_process.add_log_param_once("customer", _customer_ref(customer))
             logger_process.exception(e)
             bev.finish_with_exception(details=extra, e=e)
             raise Forbidden("Unknown error")

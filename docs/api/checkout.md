@@ -2005,3 +2005,82 @@ never during a call to a payment gateway. The cost falls on the order that loses
 rolls back. The customer never gets that session's redirect URL, so no money moves; the gateway keeps it as an
 abandoned, unpaid session. Nothing of it is left in the shop: the order and its payment intent roll back together,
 and a notification the gateway may still send for that session finds no payment and is logged as an unknown one.
+
+### Customer erasure
+
+`DELETE /api-admin/checkout/1/{channel}/customer/delete` with `{"email": "<address>"}` (admin key, scope
+`checkout.erase`; `django_checkout.output.admin.admin_customer_delete` is the same for Python callers) anonymises
+the orders and carts of that e-mail. It finds the customer's orders by the account, the `billing_email` /
+`shipping_email` columns, the e-mail of the billing or shipping address in `order_body` and the e-mail a used code
+stored, so a repeated request completes an order an earlier one left half done; carts by the account and the
+address e-mails in `cart_body`. Every match is the whole address, case aside: erasing `anna@example.org` leaves
+`joanna@example.org` alone. A pinned erase token covers its channel only.
+
+Another customer's order or cart that holds the e-mail in some other field keeps everything but that e-mail: in
+every string of the body (a gift card's `recipient_email` in `cart.items[].voucher_gift`, the `comment`, any other
+field) the address becomes the marker, and the rest of the text, the names, the addresses, the e-mail columns and
+the payments stay. The response lists such an order or cart with the others. It never refuses the erasure, even
+while the shop still has to fulfil it: a gift card bought for the erased person then has no address to go to.
+
+| Where | Anonymised | Kept |
+|---|---|---|
+| `order_body` / `cart_body` addresses | first and last name, e-mail, street, city, postcode, phone, company, tax id | country, dialling code, invoice flags, `address_id`, `external_id` |
+| `order_body` / `cart_body` | `comment`, `customer_ip`, gift-card personalisation, payment credentials (`***REDACTED***`, masked voucher codes stay) | totals, items, codes, shipping method and pickup point, `affiliate_code` |
+| `Order` | `billing_email`, `shipping_email` | status, numbers, `customer` (the account erasure in `django_accounts` sets it to NULL) |
+| `UsedCoupon` | `billing_email`, `shipping_email` | the code and the order (`max_uses_per_user` no longer ties the use to the erased e-mail) |
+| `PaymentIntent` | `provider_request`, `provider_notify`: everything except ids, amounts, currencies, statuses and timestamps; `redirect_url` (`***REDACTED***`: the gateway's payment page or, for BLIK, a copy of the body's `continue_url`; only the order's creation answer hands it out) | `amount`, `currency`, `external_order_id`, `payment_status`, `code` |
+| `PaymentRedirect` | `target_url` (`***REDACTED***`: a copy of the body's `continue_url`) | token, expiry, consumption time |
+
+Names and free text become `x` of the same length, e-mails `x…x@example.com`. Not touched: invoices
+(`Invoice.invoice_base64`, kept for accounting), order attachments, shipping tracking numbers, `Order.extra`
+(integrator data).
+
+#### Orders not fulfilled yet refuse it
+
+While the customer has an order the shop still has to fulfil, the erasure is refused and nothing is anonymised:
+not that order, not the customer's other orders, not the carts. Another customer's order that only holds the
+e-mail never refuses it. A pinned token looks at its channel's orders only.
+
+| Status | Refuses the erasure | Why |
+|---|---|---|
+| `new`, `unpaid` | yes | waiting for payment; a gateway confirms the payment for days after the order, and the shop then ships it |
+| `confirmed` | yes | paid, not shipped |
+| `holded` | yes | on hold; it goes back to `confirmed` or is cancelled |
+| `in_progress` | yes | being prepared, not handed to the carrier yet |
+| `complete` | no | delivered; the tracking number stays for complaints |
+| `returned`, `canceled` | no | nothing left to ship |
+
+v1 answers 409 with the blocking orders' ids, numbers and statuses, never the e-mail or any other personal value:
+
+```json
+{"meta": {"status": "OPEN_ORDERS", "message": "The customer has orders that are not fulfilled yet; nothing was anonymized. Cancel or finish the listed orders, then erase again", ...},
+ "data": {"deleted": false, "blocking_orders": [{"order_id": "<uuid>", "pretty_id": "0100000042", "status": "confirmed"}]}}
+```
+
+The Python API raises `django_checkout.output.admin.ErasureBlocked` instead; its `orders` holds the same
+`BlockingOrder(order_id, pretty_id, status)` entries.
+
+To erase the customer, cancel or finish (ship and complete) every listed order, then send the request again.
+Nothing cancels an order by itself: an abandoned order that waits for payment stays `unpaid` and refuses every
+erasure until someone cancels it, in the CMS or with `POST /api/checkout/v2/admin/{channel}/orders/{uid}/cancel/`. One
+gap stays: a cancelled order whose payment still arrives is confirmed again (logged CRITICAL for manual review,
+`notification_state.confirm_order`); erased in between, it has no address left to ship to.
+
+#### Erasure order: checkout first, then the account
+
+Erase in checkout first, then delete the account in `django_accounts` (`accounts.erase`). Send the account e-mail and
+every address e-mail the customer used in checkout: each request finds the orders and carts of the e-mail it names.
+
+The other way round, deleting the account sets `customer` to NULL on the orders, carts and used codes, and checkout
+can no longer find anything through the account. It then finds an order only by the e-mail sent: in the addresses of
+`order_body`, in the `billing_email` / `shipping_email` columns, or in a `UsedCoupon` row, which keeps the account
+e-mail of a logged-in customer's code. An order placed with another address e-mail and no code is reachable only by
+that address e-mail; a cart only by the e-mail in its addresses. Orders and carts with no e-mail of the customer keep
+no personal data once the account is gone.
+
+#### Orders erased before
+
+Orders erased by an earlier release kept the other fields: `manage.py complete-erasures` reports them (rows whose
+address e-mail is anonymised), `--apply` finishes them, and `--marker-domain <domain>` adds the domain an earlier
+release line anonymised e-mails to, for a database that came from one. The command finishes erasures already made,
+so orders not fulfilled yet do not stop it.

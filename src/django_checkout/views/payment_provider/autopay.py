@@ -88,7 +88,6 @@ def extract_from_xml(root, separator="|"):
 def autopay_return(request: HttpRequest, channel_idx=None, *args, **kwargs) -> HttpResponse:
     """Funkcja autopay_return() obsługuje żądania POST zawierające dane XML od AutoPay."""
     bev = Checkout_AutopayReturnEvent(is_ongoing_event=True)
-    xml_data = None
 
     try:
         raw_body = request.body.decode("utf-8")
@@ -110,8 +109,7 @@ def autopay_return(request: HttpRequest, channel_idx=None, *args, **kwargs) -> H
         except (ParseError, DefusedXmlException) as e:
             logger.exception(e)
             raise ValueError("Błąd parsowania XML") from e
-        logger.add_log_param("body", xml_data)
-        # Przetwarzanie danych transakcji
+        # Przetwarzanie danych transakcji (the XML itself stays out of the logs: its customerData is the buyer)
         service_id = root.find(".//serviceID").text
         transactions = root.findall(".//transaction")
 
@@ -156,7 +154,6 @@ def autopay_return(request: HttpRequest, channel_idx=None, *args, **kwargs) -> H
                 "payment_status": payment_status,
                 "payment_status_details": payment_status_details,
                 "is_status_changed": None,
-                "body": xml_data,
             }
 
             if not hmac.compare_digest(str(received_hash or "").encode(), calculated_hash.encode()):
@@ -183,7 +180,7 @@ def autopay_return(request: HttpRequest, channel_idx=None, *args, **kwargs) -> H
                     .first()
                 )
                 if not payment_intent:
-                    extra = {"order_id": order_id, "autopay_response": xml_data, "is_status_changed": False}
+                    extra = {"order_id": order_id, "remote_id": remote_id, "is_status_changed": False}
                     logger.set_log_params({"details": extra})
                     logger.error("There is no PaymentIntent object with the given order ID from AutoPay")
                     bev.finish_with_error(finish_tag="Cannot find related PaymentIntent object", details=extra)
@@ -283,6 +280,5 @@ def autopay_return(request: HttpRequest, channel_idx=None, *args, **kwargs) -> H
         return HttpResponse(confirmation_xml, content_type="text/xml", status=200)
 
     except Exception as e:
-        logger.add_log_param("body", xml_data)
         logger.exception(e)
         return HttpResponse("An error occurred while processing the XML request", status=500)

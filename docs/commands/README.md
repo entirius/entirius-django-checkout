@@ -12,6 +12,7 @@
 | `import-details-for-checkout-product` | Import product details |
 | `checkout-qty-to-csv` | Export stock quantities |
 | `cleanup-stranded-carts` | Delete stranded NEW carts older than `--days` days that never produced an order |
+| `complete-erasures` | Finish the anonymisation of orders and carts erased before every personal field was covered ([erasure](../api/checkout.md#customer-erasure)); dry run unless `--apply` |
 | `sync-checkout-stock-from-qms` | Sync stock from QMS sources (extra `qms`) |
 
 Details: [discount rules](discount.md), [delivery points](delivery-points.md).

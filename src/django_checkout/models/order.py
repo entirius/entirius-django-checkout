@@ -29,8 +29,15 @@ from django_checkout.models.shipping import Shipping
 from django_checkout.models.shipping_option import ShippingOption
 from django_checkout.models.stock import Stock
 from django_checkout.models.stock_reservation import StockReservation
+from django_checkout.models.used_coupon import UsedCoupon
 from django_checkout.signals import order_canceled_signal, order_confirmed_signal, order_created_signal
-from django_checkout.utils import anonymize_addresses_in_body, sanitize, scrub_payment_secrets_in_body
+from django_checkout.utils import (
+    REDACTED,
+    anonymize,
+    anonymize_addresses_in_body,
+    sanitize,
+    scrub_payment_secrets_in_body,
+)
 
 if TYPE_CHECKING:
     from django_accounts.models.customer import Customer
@@ -505,17 +512,41 @@ class Order(models.Model):
         return resolve_payment_methods_from_data(self.channel, self.as_data.payment_method)
 
     def anonymize(self) -> bool:
+        """Anonymise the customer's data on the order, its used codes and its payment intents.
+
+        True if any of them held something to anonymise. Every step runs: an `or` chain would short-circuit.
+        """
+        with transaction.atomic():
+            changed = [self._anonymize_own_fields(), self._anonymize_used_coupons(), self._redact_payment_redirects()]
+            changed += [intent.anonymize() for intent in self.payment_items.all()]
+        return any(changed)
+
+    def _anonymize_own_fields(self) -> bool:
         # Operate directly on raw order_body to be resilient to schema drift
         # (e.g. lanks in old orders).
         body = self.order_body or {}
-        # both must run — `or` would short-circuit the second call
-        anonymized = anonymize_addresses_in_body(body)
-        scrubbed = scrub_payment_secrets_in_body(body)
-        save = anonymized or scrubbed
-        if save:
+        changed = [anonymize_addresses_in_body(body), scrub_payment_secrets_in_body(body)]
+        if self.billing_email or self.shipping_email:
+            self.billing_email = anonymize(self.billing_email, "email")
+            self.shipping_email = anonymize(self.shipping_email, "email")
+            changed.append(True)
+        if any(changed):
             self.order_body = sanitize(body)
             self.save()
-        return save
+        return any(changed)
+
+    def _redact_payment_redirects(self) -> bool:
+        """A redirect's target is the body's ``continue_url``, which the body scrub redacts: redact the copy too."""
+        return self.payment_redirects.exclude(target_url=REDACTED).update(target_url=REDACTED) > 0
+
+    def _anonymize_used_coupons(self) -> bool:
+        """The e-mails a used code stores: the address e-mails or, for a logged-in customer, the account one."""
+        coupons = list(self.used_coupons.all())
+        for coupon in coupons:
+            coupon.billing_email = anonymize(coupon.billing_email, "email")
+            coupon.shipping_email = anonymize(coupon.shipping_email, "email")
+        UsedCoupon.objects.bulk_update(coupons, ["billing_email", "shipping_email"])
+        return bool(coupons)
 
     def __str__(self):
         channel_name = self.channel.label if self.channel is not None else ""

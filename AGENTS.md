@@ -146,6 +146,17 @@ toggles and defaults: `docs/configuration.md`.
 - Gateway statuses go through `domain/payment_provider/notification_state.py` (`apply_payment_status` under
   `lock_payment_intent`): COMPLETE is final, CANCELLED yields only to COMPLETE, orders are confirmed / cancelled only
   while they await payment. BI finish tags are grouped on in reports: keep their wording (`describe`).
+- Erasure (`services/customer.py` → `Order.anonymize` / `Cart.anonymize`, table in `docs/api/checkout.md`) covers
+  every personal field checkout stores. A new one goes into the scrub with it: body fields in `utils` (`_PII_FIELDS`,
+  `_BODY_PII_FIELDS`), columns and related rows in `Order.anonymize`. Gateway payloads keep an allowlist
+  (`utils/gateway_payload.py`): a key accounting needs is added there, anything else is dropped on erasure.
+  `CustomerService.anonymize_customer` refuses (`ErasureBlocked`, v1 409 `OPEN_ORDERS`) before writing anything while
+  one of the orders is outside `SETTLED_ORDER_STATUSES`: the check lives in the service so every entry point gets it.
+  `complete-erasures` calls `anonymize()` itself and is never refused. Integrators erase in checkout before deleting
+  the account in `django_accounts`; the other way round orders are found only by the e-mails they hold. The
+  customer's rows are found by fixed fields (account, e-mail columns, address e-mails, used codes), never by a body
+  search: another customer's row that holds the e-mail elsewhere only gets that e-mail replaced
+  (`utils.anonymize_email_in_body`, on a locked fresh row), and it never refuses the erasure.
 - A discount code is unique per (channel, currency), a rule without currencies covering every currency
   (`services/code_clashes.py`, `docs/api/discounts.md`). Every write path (v2 admin service, Django admin forms,
   `import-discount-rules`) calls `refuse_clash` / `refuse_scope_change`; a new one must too. No DB constraint

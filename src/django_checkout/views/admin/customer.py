@@ -3,19 +3,29 @@
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 import json
+from dataclasses import asdict
 
 from django.core.handlers.wsgi import WSGIRequest
 from django.views.decorators.csrf import csrf_exempt
 from django_utils.api.decorators import require_http_method
-from django_utils.api.exceptions import BadRequest, NotFound
+from django_utils.api.exceptions import APIException, BadRequest, NotFound
 from django_utils.api.responses import Response
 from process_logger import ProcessLogger
 
-from django_checkout.services.customer import CustomerService
+from django_checkout.services.customer import CustomerService, ErasureBlocked
 from django_checkout.utils.api.decorators import admin_view
 from django_checkout.utils.api_keys import erase_channel
 
 logger = ProcessLogger("CHECKOUT_ADMIN_VIEW", module="django_checkout")
+
+
+class OpenOrders(APIException):
+    message = (
+        "The customer has orders that are not fulfilled yet; nothing was anonymized. "
+        "Cancel or finish the listed orders, then erase again"
+    )
+    status = "OPEN_ORDERS"
+    status_code = 409
 
 
 @admin_view
@@ -23,9 +33,10 @@ logger = ProcessLogger("CHECKOUT_ADMIN_VIEW", module="django_checkout")
 @require_http_method("DELETE")
 def admin_customer_delete(request: WSGIRequest, *args, **kwargs):
     """
-    Endpoint to delete a customer email from order.
+    Endpoint to erase a customer's data from their orders and carts.
     Only the authenticated admin can delete the customer data.
-    Firstname and lastname will be anonymized.
+    Every personal field checkout keeps is anonymized (docs/api/checkout.md, "Customer erasure").
+    409 OPEN_ORDERS, with nothing anonymized, while the customer has an order that is not fulfilled yet.
     """
 
     try:
@@ -38,9 +49,13 @@ def admin_customer_delete(request: WSGIRequest, *args, **kwargs):
 
     customer_service = CustomerService()
     customer_service.set_logger(logger)
-    success, orders_idxs, carts_idxs, orders_fail, carts_fail = customer_service.anonymize_customer(
-        email, erase_channel(request)
-    )
+    try:
+        success, orders_idxs, carts_idxs, orders_fail, carts_fail = customer_service.anonymize_customer(
+            email, erase_channel(request)
+        )
+    except ErasureBlocked as blocked:
+        blocking = [asdict(order) for order in blocked.orders]
+        raise OpenOrders(data={"deleted": False, "blocking_orders": blocking}) from blocked
 
     if not success:
         raise BadRequest(

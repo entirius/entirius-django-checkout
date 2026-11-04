@@ -1,10 +1,12 @@
 import copy
+import re
 from decimal import Decimal
 
 from django_checkout.enums import PaymentProvider
 
 SECRET_PAYMENT_KEYS = ("card", "authorization_token", "continue_url")
 REDACTED = "***REDACTED***"
+ANONYMIZED_EMAIL_DOMAIN = "example.com"  # an anonymised e-mail is x…x@<this>
 
 
 def payment_entries(order_body: dict | None) -> list[dict]:
@@ -97,14 +99,38 @@ def anonymize(field, field_type):
         case "str":
             return field if not field else anonym_word * len(field)
         case "email":
-            return field if not field else f"{anonym_word * len(field.split('@')[0])}@example.com"
+            return field if not field else f"{anonym_word * len(field.split('@')[0])}@{ANONYMIZED_EMAIL_DOMAIN}"
         case _:
             raise Exception("Unknown field type")
 
 
 _ADDRESSES_TO_ANONYMIZE = ("billing_address", "shipping_address")
-_PII_FIELDS = (("firstname", "str"), ("lastname", "str"), ("email", "email"))
+# Every contact field of an address. Kept: country_code and dialling_code (VAT and statistics, they identify no
+# one), the invoice flags, address_id / external_id (keys into the address book and an external system).
+_PII_FIELDS = (
+    ("firstname", "str"),
+    ("lastname", "str"),
+    ("email", "email"),
+    ("street", "str"),
+    ("city", "str"),
+    ("postcode", "str"),
+    ("telephone", "str"),
+    ("company", "str"),
+    ("tax_id", "str"),
+)
+# Top level of order_body / cart_body: free text the customer typed and the IP the storefront sent.
+_BODY_PII_FIELDS = (("comment", "str"), ("customer_ip", "str"))
 _GIFT_PII_FIELDS = (("recipient_name", "str"), ("sender_name", "str"), ("message", "str"), ("recipient_email", "email"))
+
+
+def _anonymize_fields(blob: dict, fields: tuple) -> bool:
+    """Anonymise the filled ``fields`` of ``blob`` in place; True if one of them held a value."""
+    changed = False
+    for field_name, field_type in fields:
+        if blob.get(field_name):
+            blob[field_name] = anonymize(str(blob[field_name]), field_type)
+            changed = True
+    return changed
 
 
 def _anonymize_gift_items(body: dict) -> bool:
@@ -128,27 +154,56 @@ def _anonymize_gift_items(body: dict) -> bool:
 
 def anonymize_addresses_in_body(body: dict) -> bool:
     """
-    Anonymize PII in billing/shipping addresses AND in gift-card personalization
-    (items[].voucher_gift) inside a raw body dict (order_body / cart_body).
+    Anonymize PII in billing/shipping addresses, in gift-card personalization
+    (items[].voucher_gift) and in the customer's comment and IP inside a raw body dict
+    (order_body / cart_body).
 
     Operates directly on the dict — no schema validation, no DTO deserialization.
     Resilient to historical schema drift in unrelated fields (e.g. cart.gratis_rules,
     cart.available_gratis_rules).
 
-    Returns True if at least one address or gift blob was anonymized (caller saves).
+    Returns True if at least one address, gift blob, comment or IP was anonymized (caller saves).
     """
     if not isinstance(body, dict):
         return False
 
-    save = False
+    save = _anonymize_fields(body, _BODY_PII_FIELDS)
     addresses = body.get("addresses")
     if isinstance(addresses, dict):
         for addr_key in _ADDRESSES_TO_ANONYMIZE:
             addr = addresses.get(addr_key)
             if not isinstance(addr, dict):
                 continue
-            for field_name, field_type in _PII_FIELDS:
-                if field_name in addr:
-                    addr[field_name] = anonymize(addr[field_name], field_type)
+            _anonymize_fields(addr, _PII_FIELDS)
             save = True
     return _anonymize_gift_items(body) or save
+
+
+def _email_pattern(email: str) -> re.Pattern:
+    """``email`` as a whole address, case aside: not the tail of a longer one (``jo`` + it) nor its head (``.uk``).
+
+    Quotes, ``=``, ``/`` or ``?`` before it end a word (``'b@x.com'``, ``?email=b@x.com``); a letter, digit, ``.``,
+    ``+``, ``%``, ``_`` or ``-`` would continue the local part of another address.
+    """
+    return re.compile(rf"(?<![\w.%+-]){re.escape(email)}(?![\w-]|\.[\w-])", re.IGNORECASE)
+
+
+def _replace_in_strings(node, pattern: re.Pattern, marker: str) -> bool:
+    entries = node.items() if isinstance(node, dict) else enumerate(node) if isinstance(node, list) else ()
+    changed = False
+    for key, value in list(entries):
+        if isinstance(value, str) and (replaced := pattern.sub(marker, value)) != value:
+            node[key] = replaced
+            changed = True
+        elif isinstance(value, dict | list):
+            changed = _replace_in_strings(value, pattern, marker) or changed
+    return changed
+
+
+def anonymize_email_in_body(body: dict, email: str) -> bool:
+    """Replace ``email`` in every string of ``body`` that holds it, in place; nothing else changes.
+
+    For another customer's order or cart: the erased person is a gift card's recipient there, or named in a comment.
+    True if the body held it.
+    """
+    return _replace_in_strings(body, _email_pattern(email), anonymize(email, "email"))

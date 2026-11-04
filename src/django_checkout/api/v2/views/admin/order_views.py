@@ -96,8 +96,8 @@ class AdminOrderDetailView(CheckoutChannelMixin, APIView):
         except Order.DoesNotExist:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
-        # SECURITY: audit log for PII access (GDPR)
-        logger.info("Admin %s accessed order detail %s (email: %s)", request.user, uid, order.billing_email)
+        # SECURITY: audit log for PII access (GDPR); the order id, never the customer's data itself
+        logger.info("Admin %s accessed order detail %s", request.user, order.order_id)
 
         return Response(
             {
