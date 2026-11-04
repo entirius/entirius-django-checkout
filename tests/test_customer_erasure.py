@@ -1,0 +1,549 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+"""Customer erasure (GDPR) left personal data behind.
+
+``Order.anonymize()`` rewrote the names and e-mails inside ``order_body`` and nothing else:
+
+- the order's ``billing_email`` / ``shipping_email`` columns and the ``UsedCoupon`` rows kept the real address;
+- the street, city, postcode, phone, company and tax id of both addresses, the customer's comment and IP stayed in
+  the body (of the order and of its cart);
+- every ``PaymentIntent`` kept the gateway payloads: ``provider_request`` (what checkout sent: name, e-mail, phone,
+  address) and ``provider_notify`` (what the gateway answered: the payer, the shipping address).
+
+A repeated erasure request could not repair it: orders were found by the customer account and by ``order_body``
+only, never by the columns or by the e-mail a used code stored.
+
+Every personal value below is invented.
+"""
+
+import json
+
+import pytest
+from process_logger import ProcessLogger
+
+from django_checkout.enums import PaymentIntentStatus
+from django_checkout.models import Cart, Order, PaymentIntent, UsedCoupon
+from django_checkout.services.customer import CustomerService
+
+EMAIL = "anna.testowa@example.org"
+ACCOUNT_EMAIL = "anna.konto@example.org"
+OTHER_EMAIL = "piotr.inny@example.org"
+FIRST, LAST = "Anna", "Testowa"
+STREET, CITY, POSTCODE = "ul. Wymyslona 7", "Testowo", "00-950"
+PHONE = "600100200"
+COMPANY, TAX_ID = "Pracownia Anna Testowa", "0000000000"
+IP = "192.0.2.10"
+COMMENT = "Please call before the delivery"
+BLIK_CODE = "777123"
+PERSONAL = (EMAIL, ACCOUNT_EMAIL, FIRST, LAST, STREET, CITY, POSTCODE, PHONE, COMPANY, TAX_ID, IP, COMMENT, BLIK_CODE)
+
+ANONYMIZED_EMAIL = "xxxxxxxxxxxx@example.com"  # anonymize() of a 12-character local part
+
+
+def _address(email=EMAIL, **extra):
+    return {
+        "firstname": FIRST,
+        "lastname": LAST,
+        "email": email,
+        "street": STREET,
+        "city": CITY,
+        "postcode": POSTCODE,
+        "country_code": "PL",
+        "dialling_code": "+48",
+        "telephone": PHONE,
+        "company": COMPANY,
+        "address_id": None,
+        "external_id": None,
+        **extra,
+    }
+
+
+def _body(email=EMAIL):
+    return {
+        "addresses": {
+            "billing_address": _address(email, tax_id=TAX_ID, requested_invoice=True),
+            "shipping_address": _address(email),
+        },
+        "comment": COMMENT,
+        "customer_ip": IP,
+        "affiliate_code": "PARTNER-1",
+        "total": "123.00",
+        "currency_code": "PLN",
+        "country_code": "PL",
+    }
+
+
+def _order(channel, email=EMAIL, **fields):
+    return Order.objects.create(
+        channel=channel, order_body=_body(email), billing_email=email, shipping_email=email, **fields
+    )
+
+
+def _dump(value) -> str:
+    return json.dumps(value)
+
+
+def _leftovers(value) -> list[str]:
+    dumped = _dump(value)
+    return [personal for personal in PERSONAL if personal in dumped]
+
+
+# --- Gateway payloads -------------------------------------------------------------------------------------------
+# Shapes follow what each provider stores today (the SDK DTOs and the notify bodies); values are invented.
+
+PAYU = (
+    {
+        "customerIp": IP,
+        "merchantPosId": "300746",
+        "description": "Order 25-000001",
+        "totalAmount": "12300",
+        "buyer": {"email": EMAIL, "phone": PHONE, "firstName": FIRST, "lastName": LAST, "language": "pl"},
+        "products": [{"name": "Mug", "unitPrice": "12300", "quantity": "1"}],
+        "currencyCode": "PLN",
+        "notifyUrl": "https://shop.example.com/notify/payu/",
+        "extOrderId": "25-000001",
+        "continueUrl": "https://shop.example.com/thanks",
+        "payMethods": {"payMethod": {"type": "BLIK_AUTHORIZATION_CODE", "value": BLIK_CODE}},
+    },
+    {
+        "order": {
+            "orderId": "PAYU-ORDER-1",
+            "extOrderId": "25-000001",
+            "orderCreateDate": "2026-11-01T10:00:00.000+01:00",
+            "customerIp": IP,
+            "merchantPosId": "300746",
+            "description": "Order 25-000001",
+            "currencyCode": "PLN",
+            "totalAmount": "12300",
+            "buyer": {"email": EMAIL, "phone": PHONE, "firstName": FIRST, "lastName": LAST},
+            "status": "COMPLETED",
+        },
+        "localReceiptDateTime": "2026-11-01T10:01:00.000+01:00",
+    },
+    [
+        ("request", ("totalAmount",), "12300"),
+        ("request", ("currencyCode",), "PLN"),
+        ("request", ("extOrderId",), "25-000001"),
+        ("notify", ("order", "orderId"), "PAYU-ORDER-1"),
+        ("notify", ("order", "status"), "COMPLETED"),
+        ("notify", ("order", "totalAmount"), "12300"),
+    ],
+)
+
+PAYPAL = (
+    {
+        "intent": "CAPTURE",
+        "purchase_units": [
+            {
+                "reference_id": "25-000001",
+                "amount": {"currency_code": "PLN", "value": "123.00"},
+                "shipping": {
+                    "name": {"full_name": f"{FIRST} {LAST}"},
+                    "address": {"address_line_1": STREET, "admin_area_2": CITY, "postal_code": POSTCODE},
+                },
+            }
+        ],
+        "payer": {
+            "email_address": EMAIL,
+            "phone": {"phone_number": {"national_number": PHONE}},
+            "name": {"given_name": FIRST, "surname": LAST},
+        },
+    },
+    {
+        "id": "PAYPAL-ORDER-1",
+        "status": "COMPLETED",
+        "payer": {"name": {"given_name": FIRST, "surname": LAST}, "email_address": EMAIL, "payer_id": "PAYER-ID-1"},
+        "purchase_units": [
+            {
+                "reference_id": "25-000001",
+                "shipping": {"name": {"full_name": f"{FIRST} {LAST}"}, "address": {"address_line_1": STREET}},
+                "payments": {
+                    "captures": [
+                        {
+                            "id": "CAPTURE-1",
+                            "status": "COMPLETED",
+                            "amount": {"currency_code": "PLN", "value": "123.00"},
+                        }
+                    ]
+                },
+            }
+        ],
+        "links": [{"href": "https://api.example.com/v2/checkout/orders/PAYPAL-ORDER-1", "rel": "self"}],
+    },
+    [
+        ("request", ("purchase_units", 0, "amount", "value"), "123.00"),
+        ("notify", ("id",), "PAYPAL-ORDER-1"),
+        ("notify", ("status",), "COMPLETED"),
+        ("notify", ("purchase_units", 0, "payments", "captures", 0, "id"), "CAPTURE-1"),
+        ("notify", ("purchase_units", 0, "payments", "captures", 0, "amount", "value"), "123.00"),
+    ],
+)
+
+STRIPE = (
+    {
+        "client_reference_id": "25-000001",
+        "mode": "payment",
+        "success_url": "https://shop.example.com/thanks",
+        "line_items": [{"price_data": {"currency": "pln", "unit_amount": 12300}, "quantity": 1}],
+        "customer_email": EMAIL,
+    },
+    {
+        "id": "cs_test_1",
+        "amount_total": 12300,
+        "currency": "pln",
+        "customer_email": EMAIL,
+        "customer_details": {
+            "email": EMAIL,
+            "name": f"{FIRST} {LAST}",
+            "phone": PHONE,
+            "address": {"line1": STREET, "city": CITY, "postal_code": POSTCODE, "country": "PL"},
+            "tax_ids": [{"type": "eu_vat", "value": TAX_ID}],
+        },
+        "payment_intent": "pi_test_1",
+        "payment_status": "paid",
+        "status": "complete",
+    },
+    [
+        ("request", ("client_reference_id",), "25-000001"),
+        ("notify", ("id",), "cs_test_1"),
+        ("notify", ("amount_total",), 12300),
+        ("notify", ("payment_intent",), "pi_test_1"),
+        ("notify", ("payment_status",), "paid"),
+    ],
+)
+
+PRZELEWY24 = (
+    {
+        "merchantId": 11111,
+        "posId": 11111,
+        "sessionId": "25-000001",
+        "amount": 12300,
+        "currency": "PLN",
+        "description": "Order 25-000001",
+        "email": EMAIL,
+        "country": "PL",
+        "client": f"{FIRST} {LAST}",
+        "address": STREET,
+        "zip": POSTCODE,
+        "city": CITY,
+        "phone": PHONE,
+        "transferLabel": COMMENT,
+        "sign": "synthetic-sign",
+        "additional": {"shipping": {"type": 0, "address": STREET, "zip": POSTCODE, "city": CITY, "country": "PL"}},
+    },
+    {
+        "merchantId": 11111,
+        "posId": 11111,
+        "sessionId": "25-000001",
+        "amount": 12300,
+        "originAmount": 12300,
+        "currency": "PLN",
+        "orderId": 300000001,
+        "methodId": 154,
+        "statement": "p24-A1-B2",
+        "sign": "synthetic-sign",
+    },
+    [
+        ("request", ("sessionId",), "25-000001"),
+        ("request", ("amount",), 12300),
+        ("notify", ("orderId",), 300000001),
+        ("notify", ("amount",), 12300),
+    ],
+)
+
+PAYNOW = (
+    {
+        "amount": 12300,
+        "currency": "PLN",
+        "description": "Order 25-000001",
+        "externalId": "25-000001",
+        "buyer": {
+            "email": EMAIL,
+            "firstName": FIRST,
+            "lastName": LAST,
+            "phone": {"prefix": "+48", "number": int(PHONE)},
+            "address": {"billing": {"street": STREET, "zipcode": POSTCODE, "city": CITY, "country": "PL"}},
+        },
+    },
+    {"paymentId": "PAYNOW-1", "externalId": "25-000001", "status": "CONFIRMED", "modifiedAt": "2026-11-01T10:01:00"},
+    [
+        ("request", ("externalId",), "25-000001"),
+        ("request", ("amount",), 12300),
+        ("notify", ("paymentId",), "PAYNOW-1"),
+        ("notify", ("status",), "CONFIRMED"),
+    ],
+)
+
+AUTOPAY = (
+    {
+        "ServiceID": "100001",
+        "OrderID": "25-000001",
+        "Amount": "123.00",
+        "Description": f"{FIRST} {LAST}",
+        "GatewayID": 0,
+        "Currency": "PLN",
+        "CustomerEmail": EMAIL,
+        "Title": "Shop",
+        "Hash": "synthetic-hash",
+    },
+    {"order_id": "25-000001", "redirect_url": "https://pay.example.com/continue?token=synthetic", "status": "OK"},
+    [
+        ("request", ("OrderID",), "25-000001"),
+        ("request", ("Amount",), "123.00"),
+        ("notify", ("order_id",), "25-000001"),
+    ],
+)
+
+GATEWAYS = {
+    "payu": PAYU,
+    "paypal": PAYPAL,
+    "stripe": STRIPE,
+    "przelewy24": PRZELEWY24,
+    "paynow": PAYNOW,
+    "autopay": AUTOPAY,
+}
+
+
+def _at(payload, path):
+    for step in path:
+        payload = payload[step]
+    return payload
+
+
+def _intent(order, code):
+    request, notify, _ = GATEWAYS[code]
+    return PaymentIntent.objects.create(
+        order=order,
+        code=code,
+        amount="123.00",
+        currency="PLN",
+        external_order_id=f"{code.upper()}-EXT-1",
+        payment_status=PaymentIntentStatus.COMPLETE,
+        provider_request=request,
+        provider_notify=notify,
+    )
+
+
+# --- Order.anonymize --------------------------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_anonymize_clears_the_email_columns(channel):
+    order = _order(channel)
+
+    assert order.anonymize() is True
+
+    order.refresh_from_db()
+    assert (order.billing_email, order.shipping_email) == (ANONYMIZED_EMAIL, ANONYMIZED_EMAIL)
+
+
+@pytest.mark.django_db
+def test_anonymize_clears_the_columns_even_without_addresses_in_the_body(channel):
+    order = Order.objects.create(channel=channel, order_body={}, billing_email=EMAIL)
+
+    assert order.anonymize() is True
+
+    order.refresh_from_db()
+    assert order.billing_email == ANONYMIZED_EMAIL
+    assert order.shipping_email is None
+
+
+@pytest.mark.django_db
+def test_anonymize_clears_the_emails_of_the_used_codes(channel):
+    """A logged-in customer's code usage stores the account e-mail, not the address one."""
+    order = _order(channel)
+    UsedCoupon.objects.create(
+        channel=channel, order=order, billing_email=ACCOUNT_EMAIL, shipping_email=EMAIL, discount_code="WELCOME10"
+    )
+
+    order.anonymize()
+
+    coupon = order.used_coupons.get()
+    assert _leftovers([coupon.billing_email, coupon.shipping_email]) == []
+    assert coupon.billing_email.endswith("@example.com")
+    assert coupon.discount_code == "WELCOME10"
+
+
+@pytest.mark.django_db
+def test_anonymize_clears_every_contact_field_of_both_addresses(channel):
+    order = _order(channel)
+
+    order.anonymize()
+
+    order.refresh_from_db()
+    addresses = order.order_body["addresses"]
+    assert _leftovers(addresses) == []
+    for address in addresses.values():
+        assert address["street"] == "x" * len(STREET)
+        assert address["telephone"] == "x" * len(PHONE)
+        assert (address["country_code"], address["dialling_code"]) == ("PL", "+48")
+    assert addresses["billing_address"]["tax_id"] == "x" * len(TAX_ID)
+    assert addresses["billing_address"]["requested_invoice"] is True
+
+
+@pytest.mark.django_db
+def test_anonymize_clears_the_comment_and_the_customer_ip(channel):
+    order = _order(channel)
+
+    order.anonymize()
+
+    order.refresh_from_db()
+    assert _leftovers(order.order_body) == []
+    assert order.order_body["affiliate_code"] == "PARTNER-1"
+    assert order.order_body["total"] == "123.00"
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("code", GATEWAYS)
+def test_anonymize_drops_personal_data_from_the_gateway_payloads(channel, code):
+    order = _order(channel)
+    intent = _intent(order, code)
+
+    order.anonymize()
+
+    intent.refresh_from_db()
+    assert _leftovers(intent.provider_request) == []
+    assert _leftovers(intent.provider_notify) == []
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("code", GATEWAYS)
+def test_anonymize_keeps_what_accounting_needs_from_the_gateway_payloads(channel, code):
+    order = _order(channel)
+    intent = _intent(order, code)
+
+    order.anonymize()
+
+    intent.refresh_from_db()
+    payloads = {"request": intent.provider_request, "notify": intent.provider_notify}
+    for which, path, value in GATEWAYS[code][2]:
+        assert _at(payloads[which], path) == value, (which, path)
+    assert (str(intent.amount), intent.currency) == ("123.00", "PLN")
+    assert intent.external_order_id == f"{code.upper()}-EXT-1"
+    assert intent.payment_status == PaymentIntentStatus.COMPLETE
+
+
+@pytest.mark.django_db
+def test_anonymize_drops_the_paypal_payer_id(channel):
+    """A gateway account id identifies the person as well as the e-mail does."""
+    order = _order(channel)
+    intent = _intent(order, "paypal")
+
+    order.anonymize()
+
+    intent.refresh_from_db()
+    assert "PAYER-ID-1" not in _dump(intent.provider_notify)
+
+
+@pytest.mark.django_db
+def test_anonymize_is_idempotent(channel):
+    order = _order(channel)
+    intent = _intent(order, "paypal")
+    order.anonymize()
+    order.refresh_from_db()
+    intent.refresh_from_db()
+    first = (order.order_body, order.billing_email, intent.provider_request, intent.provider_notify)
+
+    order.anonymize()
+
+    order.refresh_from_db()
+    intent.refresh_from_db()
+    assert (order.order_body, order.billing_email, intent.provider_request, intent.provider_notify) == first
+
+
+@pytest.mark.django_db
+def test_cart_anonymize_clears_every_contact_field(channel):
+    cart = Cart.objects.create(channel=channel, cart_body=_body())
+
+    assert cart.anonymize() is True
+
+    cart.refresh_from_db()
+    assert _leftovers(cart.cart_body) == []
+    assert cart.cart_body["addresses"]["shipping_address"]["country_code"] == "PL"
+
+
+def test_gateway_payload_of_an_unknown_shape_is_dropped():
+    from django_checkout.utils.gateway_payload import scrub_gateway_payload
+
+    assert scrub_gateway_payload(None) is None
+    assert scrub_gateway_payload(f"<transaction><email>{EMAIL}</email></transaction>") is None
+    assert scrub_gateway_payload([{"status": "PAID", "email": EMAIL}]) == [{"status": "PAID"}]
+
+
+# --- The erasure request ----------------------------------------------------------------------------------------
+
+
+def _erase(email):
+    service = CustomerService()
+    service.set_logger(ProcessLogger("TEST", module="django_checkout"))
+    return service.anonymize_customer(email)
+
+
+def _old_marker_body(marker="xxxxxxxxxxxx@example.com"):
+    """order_body as the old anonymize() left it: names and e-mails replaced, the rest kept."""
+    body = _body(marker)
+    for address in body["addresses"].values():
+        address["firstname"], address["lastname"] = "x" * len(FIRST), "x" * len(LAST)
+    return body
+
+
+@pytest.fixture
+def half_anonymized_order(channel):
+    """State the old anonymize() left behind: names and e-mails gone from the body, everything else kept."""
+    order = Order.objects.create(
+        channel=channel, order_body=_old_marker_body(), billing_email=EMAIL, shipping_email=EMAIL
+    )
+    UsedCoupon.objects.create(
+        channel=channel, order=order, billing_email=EMAIL, shipping_email=EMAIL, discount_code="WELCOME10"
+    )
+    _intent(order, "payu")
+    return order
+
+
+@pytest.mark.django_db
+def test_erasure_request_finds_the_order_by_its_email_columns(half_anonymized_order):
+    success, orders_idxs, *_ = _erase(EMAIL.upper())
+
+    assert success is True
+    assert orders_idxs == [str(half_anonymized_order.order_id)]
+    half_anonymized_order.refresh_from_db()
+    assert half_anonymized_order.billing_email == ANONYMIZED_EMAIL
+    assert _leftovers(half_anonymized_order.order_body) == []
+
+
+@pytest.mark.django_db
+def test_erasure_request_finds_the_order_by_the_email_of_a_used_code(channel):
+    """The account is gone (customer set to NULL); only the used code still holds the account e-mail."""
+    order = _order(channel)
+    UsedCoupon.objects.create(
+        channel=channel, order=order, billing_email=ACCOUNT_EMAIL, shipping_email="", discount_code="WELCOME10"
+    )
+    intent = _intent(order, "stripe")
+
+    success, orders_idxs, *_ = _erase(ACCOUNT_EMAIL)
+
+    assert success is True
+    assert orders_idxs == [str(order.order_id)]
+    order.refresh_from_db()
+    intent.refresh_from_db()
+    assert _leftovers([order.order_body, order.billing_email, order.used_coupons.get().billing_email]) == []
+    assert _leftovers([intent.provider_request, intent.provider_notify]) == []
+
+
+@pytest.mark.django_db
+def test_erasure_request_leaves_other_customers_alone(channel):
+    erased = _order(channel)
+    other = _order(channel, email=OTHER_EMAIL)
+    other_intent = _intent(other, "payu")
+
+    _erase(EMAIL)
+
+    other.refresh_from_db()
+    other_intent.refresh_from_db()
+    assert other.billing_email == OTHER_EMAIL
+    assert other.order_body == _body(OTHER_EMAIL)
+    assert other_intent.provider_request == PAYU[0]
+    erased.refresh_from_db()
+    assert erased.billing_email == ANONYMIZED_EMAIL

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from django.db import models
 
 from django_checkout.enums import PaymentIntentStatus
+from django_checkout.utils.gateway_payload import scrub_gateway_payload
 
 if TYPE_CHECKING:
     from django_checkout.models.order import Order
@@ -34,6 +35,18 @@ class PaymentIntent(models.Model):
         # Allow multi-method payments (e.g. voucher + payu): unique per (order, code)
         # — one PaymentIntent per provider per order, but multiple providers OK.
         constraints = [models.UniqueConstraint(fields=["order", "code"], name="one_intent_per_order_code")]
+
+    def anonymize(self) -> bool:
+        """Keep only ids, amounts, statuses and timestamps of the gateway payloads; True if there were any.
+
+        The columns (amount, currency, external_order_id, payment_status, code) stay: accounting needs them.
+        """
+        if self.provider_request is None and self.provider_notify is None:
+            return False
+        self.provider_request = scrub_gateway_payload(self.provider_request)
+        self.provider_notify = scrub_gateway_payload(self.provider_notify)
+        self.save(update_fields=["provider_request", "provider_notify"])
+        return True
 
 
 #

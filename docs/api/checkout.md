@@ -1983,3 +1983,23 @@ a guest cart. A cancelled order keeps its use. Of two orders racing for the last
 not saved (v2 409 `DISCOUNT_USAGE_LIMIT_REACHED`, v1 403 `INVALID_REQUEST`). An automatic rule applies whatever its
 code's counter says, so its code counts up to `max_used` and then stops counting; it never refuses an order. A v1
 order whose code no longer applies is still placed without it.
+
+### Customer erasure
+
+`DELETE /api-admin/checkout/1/{channel}/customer/delete` with `{"email": "<address>"}` (admin key, scope
+`checkout.erase`; `django_checkout.output.admin.admin_customer_delete` is the same for Python callers) anonymises
+the orders and carts of that e-mail. It finds an order by the customer account, by the `billing_email` /
+`shipping_email` columns, by the e-mail a used code stored and by `order_body`, so a repeated request completes an
+order an earlier one left half done. A pinned erase token covers its channel only.
+
+| Where | Anonymised | Kept |
+|---|---|---|
+| `order_body` / `cart_body` addresses | first and last name, e-mail, street, city, postcode, phone, company, tax id | country, dialling code, invoice flags, `address_id`, `external_id` |
+| `order_body` / `cart_body` | `comment`, `customer_ip`, gift-card personalisation, payment credentials (`***REDACTED***`, masked voucher codes stay) | totals, items, codes, shipping method and pickup point, `affiliate_code` |
+| `Order` | `billing_email`, `shipping_email` | status, numbers, `customer` (the account erasure in `django_accounts` sets it to NULL) |
+| `UsedCoupon` | `billing_email`, `shipping_email` | the code and the order (`max_uses_per_user` no longer ties the use to the erased e-mail) |
+| `PaymentIntent` | `provider_request`, `provider_notify`: everything except ids, amounts, currencies, statuses and timestamps | `amount`, `currency`, `external_order_id`, `payment_status`, `code` |
+
+Names and free text become `x` of the same length, e-mails `x…x@example.com`. Not touched: invoices
+(`Invoice.invoice_base64`, kept for accounting), order attachments, shipping tracking numbers, `Order.extra`
+(integrator data), payment redirect links.

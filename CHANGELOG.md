@@ -73,6 +73,14 @@
 
 ### Fixed
 
+- Customer erasure (GDPR, `DELETE customer/delete` and `output.admin.admin_customer_delete`) anonymises every
+  personal field checkout keeps, not only the names and e-mails inside `order_body`: the order's `billing_email` /
+  `shipping_email` columns and the e-mails of its `UsedCoupon` rows; street, city, postcode, phone, company and tax id
+  of both addresses, the customer's comment and IP (in the order and in its cart); and the gateway payloads of its
+  payments (`PaymentIntent.provider_request` / `provider_notify`: buyer, payer, shipping address), which keep only
+  ids, amounts, currencies, statuses and timestamps. The intent's columns (amount, currency, external id, status)
+  stay. The request also finds orders by those e-mail columns and by the e-mail a used code stored (the account
+  e-mail of a deleted account), so repeating it completes an order an earlier erasure left half done.
 - Stripe: `notify/stripe/` stores the checkout session as plain JSON. With stripe 12 or later (the lock pins 15) a
   `StripeObject` is no dict, so saving it in `provider_notify` raised and every verified session event answered
   500 without changing the payment.

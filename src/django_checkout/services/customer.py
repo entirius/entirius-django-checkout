@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from django.db.models import Q, QuerySet
 from process_logger import ProcessLoggerMixin
 
-from django_checkout.models import Cart, Channel, Order
+from django_checkout.models import Cart, Channel, Order, UsedCoupon
 from django_checkout.signals import customer_anonymized_signal
 
 
@@ -29,14 +29,29 @@ def _in_channel(queryset: QuerySet, channel: Channel | None) -> QuerySet:
     return queryset if channel is None else queryset.filter(channel=channel)
 
 
+def _orders_of(email: str) -> QuerySet:
+    """Orders holding ``email`` anywhere checkout keeps it.
+
+    The columns and the used codes find an order whose body an earlier erasure already anonymised, so a repeated
+    request completes it; a used code also holds the account e-mail of a customer whose account is gone.
+    """
+    used_codes = UsedCoupon.objects.filter(Q(billing_email__iexact=email) | Q(shipping_email__iexact=email))
+    return Order.objects.filter(
+        Q(customer__user__email=email)
+        | Q(billing_email__iexact=email)
+        | Q(shipping_email__iexact=email)
+        | Q(pk__in=used_codes.values("order_id"))
+        | Q(order_body__icontains=email)
+    )
+
+
 class CustomerService(ProcessLoggerMixin):
     def anonymize_customer(
         self, email: str, channel: Channel | None = None
     ) -> tuple[bool, list[str], list[str], list[str], list[str]]:
         """Anonymise the orders and carts of ``email``: in ``channel`` only, or in every channel when None."""
         erasure = _Erasure()
-        orders = Order.objects.filter(Q(customer__user__email=email) | Q(order_body__icontains=email))
-        for order in _in_channel(orders, channel):
+        for order in _in_channel(_orders_of(email), channel):
             if self._anonymize_order(order, erasure) and order.cart is not None:
                 self._anonymize_cart(order.cart, erasure)
         carts = Cart.objects.filter(Q(customer__user__email=email) | Q(cart_body__icontains=email))

@@ -103,8 +103,32 @@ def anonymize(field, field_type):
 
 
 _ADDRESSES_TO_ANONYMIZE = ("billing_address", "shipping_address")
-_PII_FIELDS = (("firstname", "str"), ("lastname", "str"), ("email", "email"))
+# Every contact field of an address. Kept: country_code and dialling_code (VAT and statistics, they identify no
+# one), the invoice flags, address_id / external_id (keys into the address book and an external system).
+_PII_FIELDS = (
+    ("firstname", "str"),
+    ("lastname", "str"),
+    ("email", "email"),
+    ("street", "str"),
+    ("city", "str"),
+    ("postcode", "str"),
+    ("telephone", "str"),
+    ("company", "str"),
+    ("tax_id", "str"),
+)
+# Top level of order_body / cart_body: free text the customer typed and the IP the storefront sent.
+_BODY_PII_FIELDS = (("comment", "str"), ("customer_ip", "str"))
 _GIFT_PII_FIELDS = (("recipient_name", "str"), ("sender_name", "str"), ("message", "str"), ("recipient_email", "email"))
+
+
+def _anonymize_fields(blob: dict, fields: tuple) -> bool:
+    """Anonymise the filled ``fields`` of ``blob`` in place; True if one of them held a value."""
+    changed = False
+    for field_name, field_type in fields:
+        if blob.get(field_name):
+            blob[field_name] = anonymize(str(blob[field_name]), field_type)
+            changed = True
+    return changed
 
 
 def _anonymize_gift_items(body: dict) -> bool:
@@ -128,27 +152,26 @@ def _anonymize_gift_items(body: dict) -> bool:
 
 def anonymize_addresses_in_body(body: dict) -> bool:
     """
-    Anonymize PII in billing/shipping addresses AND in gift-card personalization
-    (items[].voucher_gift) inside a raw body dict (order_body / cart_body).
+    Anonymize PII in billing/shipping addresses, in gift-card personalization
+    (items[].voucher_gift) and in the customer's comment and IP inside a raw body dict
+    (order_body / cart_body).
 
     Operates directly on the dict — no schema validation, no DTO deserialization.
     Resilient to historical schema drift in unrelated fields (e.g. cart.gratis_rules,
     cart.available_gratis_rules).
 
-    Returns True if at least one address or gift blob was anonymized (caller saves).
+    Returns True if at least one address, gift blob, comment or IP was anonymized (caller saves).
     """
     if not isinstance(body, dict):
         return False
 
-    save = False
+    save = _anonymize_fields(body, _BODY_PII_FIELDS)
     addresses = body.get("addresses")
     if isinstance(addresses, dict):
         for addr_key in _ADDRESSES_TO_ANONYMIZE:
             addr = addresses.get(addr_key)
             if not isinstance(addr, dict):
                 continue
-            for field_name, field_type in _PII_FIELDS:
-                if field_name in addr:
-                    addr[field_name] = anonymize(addr[field_name], field_type)
+            _anonymize_fields(addr, _PII_FIELDS)
             save = True
     return _anonymize_gift_items(body) or save
