@@ -16,7 +16,11 @@ from django_checkout.domain.validators.address import validate_addresses
 from django_checkout.domain.validators.cart import check_min_order_price, validate_cart_data
 from django_checkout.domain.validators.delivery_date import validator_delivery_date
 from django_checkout.domain.validators.item import get_item_list_status
-from django_checkout.domain.validators.payment import validate_payment_method
+from django_checkout.domain.validators.payment import (
+    FREE_ORDER_AMOUNT_DUE_CODE,
+    free_order_with_amount_due,
+    validate_payment_method,
+)
 from django_checkout.domain.validators.shipping import get_shipping_method_option, validate_shipping_method
 from django_checkout.enums import ValidationStatus
 from django_checkout.settings import CUSTOMS_THRESHOLD_ENABLED
@@ -400,6 +404,16 @@ def process_cart(
             ]
             validated_payments = [vp for vp in (validated_payments or []) if vp.code not in drop_codes]
 
+    free_order_amount_due = free_order_with_amount_due(payment_methods, total)
+    if free_order_amount_due:
+        messages.append(
+            ErrorInfo(
+                code=FREE_ORDER_AMOUNT_DUE_CODE,
+                message=f"This payment method is only for orders with nothing to pay; {total} {currency} is due.",
+                affected_field="cart.payment_method",
+            )
+        )
+
     if validated_cart_data.tax_amount is not None:
         total_tax = (
             (fee_price + shipping_total_price)
@@ -427,6 +441,7 @@ def process_cart(
             and is_delivery_date_valid
             and not order_total_too_low
             and not voucher_coverage_insufficient
+            and not free_order_amount_due
             and get_item_list_status([validated_shipping, validated_payment]) == ValidationStatus.VALID
         )
         else ValidationStatus.INVALID

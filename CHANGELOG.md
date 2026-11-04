@@ -4,6 +4,10 @@
 
 ### Security
 
+- A `free_order` payment method settles only a cart with nothing left to pay (after vouchers and fees). With an
+  amount due the cart is invalid with `free_order_amount_due` (v2 `FREE_ORDER_AMOUNT_DUE`, client-visible
+  addition), the payment method list no longer offers `free_order`, and `Order.create` refuses on its own. Customer
+  groups and product links still narrow who sees the method; they no longer make a paid cart free.
 - PayPal: `notify/paypal/` changes a payment only when PayPal confirms the notification's signature
   (verify-webhook-signature, against the `webhook_id` in the payment method's `additional_data`) and the payment
   belongs to a PayPal payment method. Anything else is answered 403 and writes nothing; PayPal redelivers it. The
@@ -16,11 +20,52 @@
   records a cancellation only: for an approved or completed PayPal order it changes nothing and captures nothing.
   BI finish tags keep their wording; new outcomes add their own (`..., Order status <status> kept`,
   `PaymentIntent is already <status>, <status> ignored`).
+- Przelewy24: a verified notification completes the payment through the same rules: a resent notification of a
+  paid transaction no longer puts an order in progress, completed or returned back to CONFIRMED. The BI finish tag
+  of a confirmed order keeps its wording.
 - Paynow: notifications go through the same rules: a late or repeated status no longer pulls a COMPLETE payment
   back, re-confirms an order that moved on, or cancels an order confirmed by hand. BI finish tags keep their wording.
 
+- Paynow: `notify/paynow/` changes only a Paynow payment (another gateway's payment is answered 404, like any other
+  refused notification), and the `Signature` header is compared in constant time.
+- Przelewy24: `notify/przelewy24/` changes only a Przelewy24 payment: a notification naming another gateway's
+  payment is answered 403 before Przelewy24 is asked, and a body needs both `orderId` and `sessionId`. The verify
+  call uses the payment's own method, not the first method listed on the order (with a voucher listed first it
+  failed).
+- Przelewy24: a notification is verified by its `sign` (SHA-384 over the documented fields and the method's CRC key)
+  before Przelewy24's verify API is asked; a missing CRC key or sign is answered 403. The CRC key comes from the
+  method's `crc_key`, else the `PRZELEWY24_CRC_KEY` setting, for the sign and the verify call alike.
+- Autopay: a repeated or late `SUCCESS` ITN confirms an order only while it waits for payment, through the same
+  rules; an order in progress, completed or returned keeps its status. A COMPLETE payment was already never
+  downgraded. BI finish tags keep their wording.
+- Paynow: notifications go through the same rules: a late or repeated status no longer pulls a COMPLETE payment
+  back, re-confirms an order that moved on, or cancels an order confirmed by hand. BI finish tags keep their wording.
+
+- Autopay: `notify/autopay/` verifies an ITN only with a non-empty `AUTOPAY_HASH_KEY` entry of the channel in the
+  URL; without one the ITN is answered 400 `NOTCONFIRMED` (it was 500 for a channel missing from the setting). The
+  hash is compared in constant time.
+- Autopay: a verified ITN changes only an Autopay payment of the channel whose hash key verified it.
+- Stripe: checkout session events go through the same rules: a late or repeated event no longer pulls a COMPLETE
+  payment back, re-confirms an order that moved on, or cancels an order confirmed by hand and releases its stock.
+  An unhandled `payment_status` on an open payment still sets ERROR and answers 400. BI finish tags keep their
+  wording.
+- PayU: signed notifications (`payu`, `payu_card`, `payu_blik`) go through the same rules: a late or repeated status
+  no longer pulls a COMPLETE payment back, re-confirms an order that moved on, or cancels an order confirmed by hand
+  and releases its stock. BI finish tags keep their wording.
+
+- Paynow: notifications go through the same rules: a late or repeated status no longer pulls a COMPLETE payment
+  back, re-confirms an order that moved on, or cancels an order confirmed by hand. BI finish tags keep their wording.
+
+- Stripe: `notify/stripe/` verifies an event only with a non-empty `endpoint_secret` of the channel's Stripe
+  payment method; without one the event is answered 400. The view no longer sets the process-wide
+  `stripe.api_key`, and a request without a `Stripe-Signature` header is answered 400 instead of 500.
+- Stripe: a verified event changes only a Stripe payment of the channel whose endpoint secret verified it.
+
+
 ### Upgrade notes
 
+- **Przelewy24:** notifications are refused (403) for a Przelewy24 method without a CRC key: set `crc_key` in its
+  `additional_data` or the `PRZELEWY24_CRC_KEY` setting. Registering transactions already needed it for their sign.
 - **PayPal:** every PayPal payment method needs `webhook_id` (PayPal developer dashboard: the REST app, Webhooks,
   Webhook ID of the webhook pointing at `notify/paypal/`) in its `additional_data`. Without it webhook notifications
   are refused (PayPal retries them for about 3 days) and an order is confirmed only when the buyer returns to the
@@ -30,6 +75,10 @@
 
 - The PayPal `webhook_id` warning (`django_checkout.W002`) reaches the CMS: it carries the `entirius_config` tag
   django-munin collects, and names the methods in its hint.
+- Stripe: `notify/stripe/` stores the checkout session as plain JSON. With stripe 12 or later (the lock pins 15) a
+  `StripeObject` is no dict, so saving it in `provider_notify` raised and every verified session event answered
+  500 without changing the payment.
+
 - PayPal: the buyer's return (`return/paypal/`) saves the status PayPal's capture API reports on the payment and
   the order. It answered 500 after the capture and saved nothing, so only the webhook confirmed PayPal orders.
 ### Added

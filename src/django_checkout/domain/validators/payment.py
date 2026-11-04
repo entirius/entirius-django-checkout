@@ -2,7 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from django_utils.api.responses import ErrorInfo
@@ -17,6 +17,19 @@ if TYPE_CHECKING:
 
 
 PAY_CODE_MASK_SUFFIX = "********"
+
+FREE_ORDER_AMOUNT_DUE_CODE = "free_order_amount_due"
+
+
+def free_order_with_amount_due(payment_methods, amount_due) -> bool:
+    """True when a free_order method would settle a cart that still has something to pay.
+
+    free_order confirms the order and marks it paid without any payment, so it may only close
+    a cart whose amount due (after vouchers and fees) is 0. Customer groups and product links
+    narrow who sees the method; they do not make a paid cart free.
+    """
+    is_free_order = any(getattr(pm, "is_free_order", False) for pm in payment_methods or [])
+    return is_free_order and Decimal(str(amount_due or 0)) > 0
 
 
 def _mask_voucher_pay_code(raw: str) -> str:
