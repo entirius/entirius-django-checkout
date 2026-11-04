@@ -22,6 +22,11 @@ def settling_payment_method(methods):
     return next((method for method in present if not is_voucher_method(method)), present[0] if present else None)
 
 
+def covered_by_vouchers(voucher_paid, amount_due) -> bool:
+    """True when the vouchers leave nothing to pay: the other methods settle nothing and carry no fee."""
+    return voucher_paid > 0 and amount_due <= 0
+
+
 def vouchers_first(methods) -> list:
     """Vouchers ahead of the other methods, each group in its own order.
 

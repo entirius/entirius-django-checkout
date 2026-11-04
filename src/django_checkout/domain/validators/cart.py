@@ -59,7 +59,7 @@ def validate_cart_data(
     validated_addresses,
     shipping_method,
     shipping_option,
-    payment_method,
+    payment_methods,
     full_checkout_data: CheckoutData = None,
     customer=None,
     split_order_data=None,
@@ -285,7 +285,7 @@ def validate_cart_data(
             shipping_option_method = shipping_option.method
 
         products_available, allowed_guest_checkout = get_product_available(
-            sku_list, shipping_option_method, payment_method, channel, customer
+            sku_list, shipping_option_method, payment_methods, channel, customer
         )
         item_sum_weight, items_dont_have_weight, unit_weights = check_items_weight(items, channel)
         items_are_too_heavy = check_cart_is_too_heavy(item_sum_weight, shipping_option_method)
