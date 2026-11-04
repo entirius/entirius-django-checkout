@@ -5,19 +5,20 @@
 import json
 
 from django.core.handlers.wsgi import WSGIRequest
+from django.db import transaction
 from django.views.decorators.csrf import csrf_exempt
 from django_utils.api.decorators import api_view, require_http_method
 from django_utils.api.responses import Response
 from process_logger import ProcessLogger
 
+from django_checkout.domain.payment_provider.notification_state import apply_payment_status, lock_payment_intent
 from django_checkout.domain.payment_provider.payu_signature import (
     SECOND_KEY_FIELD,
     SIGNATURE_HEADER,
     is_valid_notification,
 )
-from django_checkout.domain.reservation import release_stock_reservation
-from django_checkout.enums import OrderStatus, PaymentIntentStatus
-from django_checkout.models import Order, PaymentIntent, PaymentMethod
+from django_checkout.enums import PaymentIntentStatus
+from django_checkout.models import PaymentIntent, PaymentMethod
 
 from ...bi import Checkout_PayuNotifyEvent
 
@@ -111,87 +112,50 @@ def payu_notify(request: WSGIRequest, *args, **kwargs):
         bev.finish_with_error(finish_tag="Payu response error, can not find status field", details=extra)
         return Response(data={"message": "For more information see log"}, status="FAIL", status_code=200)
 
-    # Business Logic
-    payment_intent.provider_notify = body
-    extra = {
-        "order_id": payment_intent.order.order_id,
-        "payment_intent_pk": payment_intent.pk,
-        "payu_order_id": payu_order_id,
-        "payment_status_prev": payment_intent.payment_status,
-        "payment_status": None,
-        "order_status_prev": payment_intent.order.order_status,
-        "order_status": None,
-        "is_status_changed": None,
-    }
-    logger_process.set_log_params({"details": extra})
-    if body["order"]["status"] == "PENDING":
-        # jesli payment jest PENDING
-        # to nie ma to wpływu na zamówienie
-        payment_intent.payment_status = PaymentIntentStatus.PENDING
-        payment_intent.save()
-        logger_process.add_log_param("is_status_changed", True)
-        logger_process.add_log_param("order_status", payment_intent.order.order_status)
-        logger_process.add_log_param("payment_status", payment_intent.payment_status)
-        logger_process.info("PaymentIntent status is set to PENDING")
-        extra["is_status_changed"] = True
-        extra["order_status"] = payment_intent.order.order_status
-        extra["payment_status"] = payment_intent.payment_status
-        bev.finish_with_success(finish_tag="PaymentIntent status is set to PENDING", details=extra)
-        return Response(data={})
-
-    elif body["order"]["status"] == "CANCELED":
-        # jesli payment jest CANCELED
-        # to zamówienie jest zamykane
-        is_status_changed = payment_intent.payment_status != PaymentIntentStatus.CANCELLED
-        payment_intent.payment_status = PaymentIntentStatus.CANCELLED
-        if is_status_changed:
-            release_stock_reservation(payment_intent.order)
-        payment_intent.save()
-        order: Order = payment_intent.order
-        order.order_status = OrderStatus.CANCELED
-        order.save()
-        logger_process.add_log_param("is_status_changed", is_status_changed)
-        logger_process.add_log_param("order_status", payment_intent.order.order_status)
-        logger_process.add_log_param("payment_status", payment_intent.payment_status)
-        logger_process.info("PaymentIntent status is set to CANCELED")
-        extra["is_status_changed"] = is_status_changed
-        extra["order_status"] = payment_intent.order.order_status
-        extra["payment_status"] = payment_intent.payment_status
-        bev.finish_with_success(finish_tag="PaymentIntent status is set to CANCELED", details=extra)
-        return Response(data={})
-
-    elif body["order"]["status"] == "COMPLETED":
-        # jesli payment jest COMPLETED
-        # to ustawiamy status zamówienia na CONFIRMED
-        payment_intent.payment_status = PaymentIntentStatus.COMPLETE
-        payment_intent.save()
-        order: Order = payment_intent.order
-        order.order_status = OrderStatus.CONFIRMED
-        # order.in_status_since = timezone.now() # jest autoustawianie Order.in_status_since w save()
-        order.save()
-        logger_process.add_log_param("is_status_changed", True)
-        logger_process.add_log_param("order_status", payment_intent.order.order_status)
-        logger_process.add_log_param("payment_status", payment_intent.payment_status)
-        logger_process.info("PaymentIntent status is set to COMPLETE, Order status is set to CONFIRMED")
-        extra["is_status_changed"] = True
-        extra["order_status"] = payment_intent.order.order_status
-        extra["payment_status"] = payment_intent.payment_status
-        bev.finish_with_success(
-            finish_tag="PaymentIntent status is set to COMPLETE, Order status is set to CONFIRMED", details=extra
-        )
-        return Response(data={})
-
-    # Nieobsluzone przypadki
-    payment_intent.payment_status = PaymentIntentStatus.ERROR
-    payment_intent.save()
-    logger_process.add_log_param("is_status_changed", True)
-    logger_process.add_log_param("order_status", payment_intent.order.order_status)
-    logger_process.add_log_param("payment_status", payment_intent.payment_status)
-    logger_process.add_log_param("unsupported_payment_status", body["order"]["status"])
-    logger_process.error("Unsupported PayU payment_status, PaymentIntent status is set to error")
-    extra["is_status_changed"] = True
+    # Business Logic, under the notification_state rules: PayU redelivers and reorders
+    # notifications, and a late one must not undo a payment or touch an order that moved on.
+    status = body["order"]["status"]
+    with transaction.atomic():
+        payment_intent = lock_payment_intent(payment_intent)
+        payment_intent.provider_notify = body
+        extra = {
+            "order_id": payment_intent.order.order_id,
+            "payment_intent_pk": payment_intent.pk,
+            "payu_order_id": payu_order_id,
+            "payment_status_prev": payment_intent.payment_status,
+            "payment_status": None,
+            "order_status_prev": payment_intent.order.order_status,
+            "order_status": None,
+            "is_status_changed": None,
+        }
+        logger_process.set_log_params({"details": extra})
+        message, finish_tag = _apply_notification(payment_intent, status, extra)
     extra["order_status"] = payment_intent.order.order_status
     extra["payment_status"] = payment_intent.payment_status
-    extra["unsupported_payment_status"] = body["order"]["status"]
-    bev.finish_with_success(finish_tag="Unsupported PayU payment_status", details=extra)
+    if "unsupported_payment_status" in extra:
+        logger_process.error(message)
+    else:
+        logger_process.info(message)
+    bev.finish_with_success(finish_tag=finish_tag, details=extra)
     return Response(data={})
+
+
+# PayU order status -> PaymentIntent status it stands for; anything else is an error.
+_INTENT_STATUS = {
+    "PENDING": PaymentIntentStatus.PENDING,
+    "CANCELED": PaymentIntentStatus.CANCELLED,
+    "COMPLETED": PaymentIntentStatus.COMPLETE,
+}
+
+
+def _apply_notification(payment_intent: PaymentIntent, status: str, extra: dict) -> tuple[str, str]:
+    """Apply ``status`` to the locked intent and its order; returns (log message, BI finish tag)."""
+    outcome = apply_payment_status(payment_intent, _INTENT_STATUS.get(status, PaymentIntentStatus.ERROR))
+    extra["is_status_changed"] = outcome.changed
+    if outcome.applied and status not in _INTENT_STATUS:
+        extra["unsupported_payment_status"] = status
+        return (
+            "Unsupported PayU payment_status, PaymentIntent status is set to error",
+            "Unsupported PayU payment_status",
+        )
+    return outcome.message, outcome.message

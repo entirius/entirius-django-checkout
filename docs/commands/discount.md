@@ -32,6 +32,10 @@ params file_path - Csv file directory
 
 Komenda importuje z pliku CSV informacje o rolach koszykowych.
 
+A code that another rule of the same channel and currency already holds is skipped with a warning in the log; a
+row whose new channels would make one of the rule's codes clash is skipped whole
+([one code per channel and currency](../api/discounts.md#one-code-per-channel-and-currency)).
+
 
 
 
