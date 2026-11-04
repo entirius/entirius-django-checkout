@@ -20,6 +20,16 @@
   records a cancellation only: for an approved or completed PayPal order it changes nothing and captures nothing.
   BI finish tags keep their wording; new outcomes add their own (`..., Order status <status> kept`,
   `PaymentIntent is already <status>, <status> ignored`).
+- Autopay: a repeated or late `SUCCESS` ITN confirms an order only while it waits for payment, through the same
+  rules; an order in progress, completed or returned keeps its status. A COMPLETE payment was already never
+  downgraded. BI finish tags keep their wording.
+- Paynow: notifications go through the same rules: a late or repeated status no longer pulls a COMPLETE payment
+  back, re-confirms an order that moved on, or cancels an order confirmed by hand. BI finish tags keep their wording.
+
+- Autopay: `notify/autopay/` verifies an ITN only with a non-empty `AUTOPAY_HASH_KEY` entry of the channel in the
+  URL; without one the ITN is answered 400 `NOTCONFIRMED` (it was 500 for a channel missing from the setting). The
+  hash is compared in constant time.
+- Autopay: a verified ITN changes only an Autopay payment of the channel whose hash key verified it.
 - Stripe: checkout session events go through the same rules: a late or repeated event no longer pulls a COMPLETE
   payment back, re-confirms an order that moved on, or cancels an order confirmed by hand and releases its stock.
   An unhandled `payment_status` on an open payment still sets ERROR and answers 400. BI finish tags keep their
@@ -35,6 +45,7 @@
   payment method; without one the event is answered 400. The view no longer sets the process-wide
   `stripe.api_key`, and a request without a `Stripe-Signature` header is answered 400 instead of 500.
 - Stripe: a verified event changes only a Stripe payment of the channel whose endpoint secret verified it.
+
 
 ### Upgrade notes
 
