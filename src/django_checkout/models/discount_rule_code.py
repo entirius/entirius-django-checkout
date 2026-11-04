@@ -104,7 +104,7 @@ class DiscountRuleCode(models.Model):
         blank=True,
         related_name="discount_rule_code_currency",
         help_text="Waluty, dla których reguła rabatowa jest ważna. Brak oznacza dla wszystkich.",
-    )  # Waluty aktualnie tylko do obsługi gratisów
+    )
     show_when_invalid = models.BooleanField(
         default=True,
         help_text="Czy reguła gratisowa ma być widoczna w /gratis-rules/ nawet gdy użytkownik nie spełnia warunków.",

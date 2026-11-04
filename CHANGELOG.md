@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- A discount rule limited to some currencies (`currencies`) applies only to carts in one of them; a rule with none
+  applies in every currency, as before. Only the gratis offer list read the field, so a PLN-only automatic rule
+  discounted an EUR cart, a PLN-only rule could win priority arbitration on an EUR cart and block its codes, and a
+  code on an EUR and a PLN rule (`GRATIS_STEP` in the test package) took the PLN rule on an EUR cart and offered no
+  gift. A code whose rules all leave out the cart currency is rejected as `currency_not_supported` (v2
+  `DISCOUNT_CURRENCY_NOT_SUPPORTED`, meta `currency`); v1 lists it under `one_or_more_discount_invalid`.
+
 ## 10.0.1 — 2026-10-27
 
 ### Added
