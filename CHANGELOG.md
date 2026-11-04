@@ -73,6 +73,10 @@
 
 ### Fixed
 
+- The cart reports `voucher_not_supported_on_split_order` for the cart it answers with. The rule asked whether the
+  saved cart splits, with the items and `split_order` of the previous save: a PATCH adding the item that splits the
+  cart came back without the error and the PATCH removing it still carried it. The order gate (v1 403, v2 409) is
+  unchanged: it reads the saved cart, which is what the order splits.
 - Stripe: a line of several units with a cart discount is charged its discounted total. Its `unit_amount` was the
   unit price less the discount of the whole line, and Stripe multiplies `unit_amount` by the quantity: 3 x 54.99 at
   15 % off charged 90.72 instead of 140.22, and a large discount sent a negative amount Stripe refused. Lines carry

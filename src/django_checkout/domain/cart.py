@@ -3,6 +3,7 @@
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 from django_pricemanager.output import validate_access_to_price_list
@@ -50,11 +51,13 @@ def _sent_discount_codes(data: CartRequest, checkout_data: CheckoutData) -> list
     return [d.code for d in discounts if d.code and not getattr(d, "is_automatic", False)]
 
 
-def voucher_split_parts(cart: "Cart | None", channel: "Channel", carries_voucher: bool) -> int:
+def voucher_split_parts(cart: "Cart | SimpleNamespace | None", channel: "Channel", carries_voucher: bool) -> int:
     """How many orders a cart that carries a voucher splits into; 0 when it does not split or carries none.
 
     Each part of a split is created with one payment method, the gateway, so a voucher reaches none of them: the
-    parts add up to the full amount and the voucher keeps its balance.
+    parts add up to the full amount and the voucher keeps its balance. ``cart`` is the saved record or a view of
+    the cart being processed: ``check_that_order_can_be_split`` reads only ``as_data.cart.items`` and
+    ``as_data.split_order``.
     """
     if cart is None or not carries_voucher:
         return 0
@@ -355,14 +358,28 @@ def process_cart(
     if msg:
         messages.append(msg)
 
+    if data.split_order is not None and isinstance(data.split_order, bool):
+        split_order = data.split_order
+    elif checkout_data.split_order is not None and isinstance(checkout_data.split_order, bool):
+        split_order = checkout_data.split_order
+    else:
+        split_order = False
+
     # A voucher on a cart that splits is refused here, while the customer can still change the cart. The voucher
     # is an amount taken off the total, or a payment entry: by code in the request's entries (no provider there),
-    # by provider in the channel's methods (none resolve while the cart has no address).
+    # by provider in the channel's methods (none resolve while the cart has no address). A cart save is judged on
+    # the cart it produces (the saved record still holds the items and split_order of the previous save); an
+    # order on the saved record, which is what the order then splits.
     carries_voucher = not split_order_data and (
         Decimal(str(validated_cart_data.voucher_amount_applied or 0)) > 0
         or any(is_voucher_method(pm) for pm in [*(validated_payments or []), *(payment_methods or [])])
     )
-    split_parts = voucher_split_parts(cart, channel, carries_voucher)
+    split_cart = (
+        SimpleNamespace(as_data=SimpleNamespace(cart=validated_cart_data, split_order=split_order))
+        if cart is not None and not is_order_creation
+        else cart
+    )
+    split_parts = voucher_split_parts(split_cart, channel, carries_voucher)
     if split_parts:
         messages.append(voucher_on_split_order_error(split_parts))
 
@@ -475,12 +492,6 @@ def process_cart(
         else ValidationStatus.INVALID
     )
 
-    if data.split_order is not None and isinstance(data.split_order, bool):
-        split_order = data.split_order
-    elif checkout_data.split_order is not None and isinstance(checkout_data.split_order, bool):
-        split_order = checkout_data.split_order
-    else:
-        split_order = False
     messages = [msg for msg in messages if msg]
     return (
         CheckoutData(
