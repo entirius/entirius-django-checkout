@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Security
+
+- No exception text in the v2 admin discount and cart responses (CodeQL `py/stack-trace-exposure`, 9 alerts). The v2
+  admin discount routes answered any `ValueError` / `ObjectDoesNotExist` from below with its text as a 400 / 404
+  `message`; the cart (v1 and v2) carried the text of a `ValueError` from the delivery price lookup in the shipping
+  message (`Error while getting delivery prices: <exception>.`).
+
+### Changed
+
+- The discount service raises `InvalidDiscountInput` (a `ValueError`) and `DiscountObjectNotFound` (an
+  `ObjectDoesNotExist`); they and `DiscountCodeClash` are `ClientError`s (`services/exceptions.py`). The admin
+  discount routes answer only these with their message: same status, `error` and text as before. Any other exception
+  goes to the v2 handler: 500 `INTERNAL_ERROR` with a `debug_id` instead of a 400 / 404 with the exception text.
+- The shipping message of a cart whose delivery price lookup fails is `Error while getting delivery prices. `; the
+  exception goes to the `checkout.shipping` log as a warning.
+
 ## 10.1.0 — 2026-11-04
 
 ### Security

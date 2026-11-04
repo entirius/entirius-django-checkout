@@ -83,6 +83,7 @@ src/django_checkout/
 │   ├── order_service.py     # v2 order create/list
 │   ├── discount_usage.py    # code usage of an order (v1 + v2): counters, UsedCoupon rows
 │   ├── customer.py          # Customer anonymization
+│   ├── exceptions.py        # ClientError: refusals whose message is written for the client
 │   └── stock_sync_service.py # QMS warehouse sync
 ├── worker/                  # Discount calculation, order splitting
 ├── enums/                   # Status enums, payment providers
@@ -119,6 +120,9 @@ toggles and defaults: `docs/configuration.md`.
 ## Gotchas
 
 - `cart_body` JSONField is the shared contract between v1 and v2. Both read/write the same blob.
+- A refusal whose text reaches the client is a `ClientError` (`services/exceptions.py`) and the view answers
+  `exc.client_message`, never `str(exc)`: any other exception goes to the v2 handler (500 with `debug_id`). Cart
+  messages (`process_cart` → `_errors`) reach the client too: no exception text in them, log it instead.
 - `process_cart()` in `domain/cart.py` is the main processing pipeline — shared by v1 and v2.
 - v1 and v2 URLs coexist. v2 patterns MUST be before v1's `<str:version>` in `urls.py`.
 - Payment webhooks stay v1 only (external provider contracts).

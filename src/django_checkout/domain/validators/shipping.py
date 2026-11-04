@@ -2,6 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+import logging
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -19,6 +20,8 @@ from django_checkout.worker.product_virtual import check_all_virtual_products
 
 if TYPE_CHECKING:
     from django_checkout.models.channel import Channel
+
+logger = logging.getLogger("checkout.shipping")
 
 
 def validate_shipping_method(
@@ -81,8 +84,11 @@ def validate_shipping_method(
                 new_shipping_price_modifier = new_shipping_price_modifier if free_delivery_modifier_items else 0
                 unit_price = new_shipping_price + new_shipping_price_modifier
                 base_unit_price = unit_price
-            except ValueError as e:
-                return generate_dummy_shipping_data(shipping), f"Error while getting delivery prices: {e}. "
+            except ValueError as exc:
+                # The cart message reaches the API client; the exception text stays in the log. A warning without
+                # the traceback: the cart is recalculated on every request while the option stays misconfigured.
+                logger.warning("Delivery prices failed for shipping option %s: %s", shipping_option.pk, exc)
+                return generate_dummy_shipping_data(shipping), "Error while getting delivery prices. "
 
             unit_price_netto = Decimal(unit_price / (1 + Decimal(shipping_option.tax_rate or 0))).quantize(
                 Decimal("0.01")

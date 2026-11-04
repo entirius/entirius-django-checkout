@@ -21,6 +21,7 @@ from operator import itemgetter
 from django.db.models import Count, QuerySet
 
 from django_checkout.models import DiscountCode, DiscountRuleCode
+from django_checkout.services.exceptions import ClientError
 
 
 @dataclass(frozen=True)
@@ -64,7 +65,7 @@ class CodeClash:
         )
 
 
-class DiscountCodeClash(ValueError):
+class DiscountCodeClash(ClientError, ValueError):
     """A write would make a code clash; ``field`` is the request field it belongs to."""
 
     def __init__(self, field: str, clash: CodeClash):
