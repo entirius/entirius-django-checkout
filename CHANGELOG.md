@@ -73,6 +73,12 @@
 
 ### Fixed
 
+- A gateway paid next to a voucher (`payment_method` `[voucher, gateway]`) reads its own entry of the list, not
+  entry `[0]`, which is the voucher's. PayU (`payu`, `payu_card`, `payu_blik`) and Stripe got no return URL
+  (`continueUrl`, `success_url`; Stripe refuses a session without one) and PayU card no card token. BLIK sent the
+  customer's BLIK code on no order, with or without a voucher: it looked for `pay_code` on the list itself. PayPal's
+  breakdown carries the voucher in `discount`: the amount is net of the voucher and the parts were not, so PayPal
+  refused the order.
 - Merging a guest cart into the customer's cart no longer fails, v1 (`carts/{id}/merge/`) and v2
   (`POST carts/{id}/merge/`). `CartRequest.factory()` left out five fields the request requires
   (`custom_order_id`, `requested_delivery_date`, `split_order`, `affiliate_code`, `customer_ip`), so every merge

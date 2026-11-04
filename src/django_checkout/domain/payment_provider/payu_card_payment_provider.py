@@ -26,16 +26,17 @@ class PayUCardPaymentProvider(PayUPaymentProvider, ProcessLoggerMixin):
 
     def save_payment_method(self, order, order_dto, payu_order):
         self.logger.add_log_param_once("order_id", self.order_id)
-        if order_dto.primary_payment_method.save_card:
-            if not order_dto.primary_payment_method.card.startswith("TOK_"):
+        card_data = self.own_payment_data(order_dto)
+        if card_data.save_card:
+            if not card_data.card.startswith("TOK_"):
                 self.logger.warning("Payment cant be processed. Token need to be MULTI, not SINGLE - save card")
                 raise Exception("Wrong token type to save card card.")
         else:
-            if order_dto.primary_payment_method.card.startswith("TOK_"):
+            if card_data.card.startswith("TOK_"):
                 self.logger.warning("Payment cant be processed. Token need to be SINGLE, not MULTI - one-use card")
                 raise Exception("Wrong token type to one-use card.")
         try:
-            if order.customer and order_dto.primary_payment_method.save_card:
+            if order.customer and card_data.save_card:
                 from django_vault.models import (
                     Channel,
                     ChannelPayment,
@@ -84,17 +85,13 @@ class PayUCardPaymentProvider(PayUPaymentProvider, ProcessLoggerMixin):
             else self.payment_method.channel.default_currency.iso3.upper()
         )
 
-        if order_dto.primary_payment_method.card is not None:
-            pay_methods = PayUPayMethods.factory("CARD_TOKEN", order_dto.primary_payment_method.card)
-        else:
-            pay_methods = None
+        card_token = self.own_payment_data(order_dto).card
+        pay_methods = PayUPayMethods.factory("CARD_TOKEN", card_token) if card_token is not None else None
 
         payu_order = PayUOrder(
             extOrderId=order.pretty_id,
             notifyUrl=self.get_notify_url(),
-            continueUrl=self.resolve_continue_url(
-                order_dto.primary_payment_method.add_order_id_to_continue_url(order.pretty_id), order
-            ),
+            continueUrl=self.resolve_own_continue_url(order, order_dto),
             customerIp=self.get_client_ip(),
             merchantPosId=self.payment_method.additional_data["pos_id"],
             description=order.pretty_id,
