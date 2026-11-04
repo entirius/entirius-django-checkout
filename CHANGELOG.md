@@ -9,6 +9,11 @@
   required and default components). For other modules that answer stock, so a bundle they report available is one
   the cart accepts. SKUs that are not bundles are left out.
 
+### Fixed
+
+- A bundle counts all of its components when several bundles are checked at once. The links were grouped by
+  adjacent rows of an unordered query, so a bundle whose links came apart kept only the last group of them.
+
 ## 10.0.1 — 2026-10-27
 
 ### Added

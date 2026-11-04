@@ -98,3 +98,20 @@ def test_other_skus_are_left_out(channel, stock, bundle):
 def test_an_unknown_channel_or_no_skus_answers_nothing(channel, bundle):
     assert get_bundle_quantities([BUNDLE], "no-such-channel") == {}
     assert get_bundle_quantities([], channel.idx) == {}
+
+
+def test_links_of_one_bundle_apart_in_the_rows_all_count():
+    """The links query has no order: rows of one bundle may come apart, and each still counts."""
+    from django_checkout.domain.bundle import get_grouped_data
+
+    def row(bundle_sku, sub_sku):
+        return {
+            "product_bundle__real_product__sku": bundle_sku,
+            "subproduct__real_product__sku": sub_sku,
+            "quantity": 1,
+        }
+
+    grouped = get_grouped_data([row(BUNDLE, BED), row("ENT-BND-DESK", LAMP), row(BUNDLE, PILLOW)])
+
+    assert sorted(grouped[BUNDLE]) == [BED, PILLOW]
+    assert sorted(grouped["ENT-BND-DESK"]) == [LAMP]
