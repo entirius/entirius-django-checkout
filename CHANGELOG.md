@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- An order is refused when a valid item is priced 0 (`UNPROCESSABLE_ENTITY sku: <sku>`, v1 403). `OrderValidation`
+  compared `str(total_price) == 0`, a string against an int, so the check never fired and such an item went into
+  the order. A gift still passes at 0 (`GRATIS_MECHANISM = 2`, `GRATIS_PRICE = 0`), and an item that is not valid
+  keeps its own reason (`OUT_OF_STOCK`), not the 0 that `invalid_factory` gives it.
+
 ## 10.0.1 — 2026-10-27
 
 ### Added
