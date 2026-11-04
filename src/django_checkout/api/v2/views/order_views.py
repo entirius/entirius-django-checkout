@@ -19,7 +19,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from django_checkout.api.v2.exceptions import CartNotReadyConflict
 from django_checkout.api.v2.mixins import CheckoutChannelMixin
 from django_checkout.api.v2.openapi import CHANNEL_PARAM, FILE_PARAM, ORDER_PARAM, PRETTY_ID_PARAM
-from django_checkout.api.v2.permissions import ChannelAPIKeyPermission
+from django_checkout.api.v2.permissions import GUEST_PERMISSIONS, ChannelAPIKeyPermission
 from django_checkout.domain.validators.order import CartNotReady
 from django_checkout.models import Order, OrderAttachment
 from django_checkout.schemas.responses.order import OrderCreateResponse, OrderListResponse
@@ -32,7 +32,7 @@ logger = logging.getLogger("checkout.v2.orders")
 @extend_schema(parameters=[CHANNEL_PARAM])
 class OrderCreateView(CheckoutChannelMixin, APIView):
     authentication_classes = [JWTAuthentication]
-    permission_classes = [ChannelAPIKeyPermission]
+    permission_classes = GUEST_PERMISSIONS
 
     @extend_schema(
         summary="Create order",

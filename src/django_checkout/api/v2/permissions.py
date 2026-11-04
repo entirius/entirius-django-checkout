@@ -2,7 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-from rest_framework.permissions import BasePermission
+from rest_framework.permissions import AllowAny, BasePermission
 
 from django_checkout.models import APIKey, Channel
 from django_checkout.utils.api_keys import STOREFRONT_SCOPE, access_installed, key_is_valid
@@ -43,3 +43,9 @@ class ChannelAPIKeyPermission(BasePermission):
             return False
         request.checkout_channel = key_obj.channel
         return True
+
+
+# A guest route: the channel key alone, plus the customer JWT when there is one. AllowAny grants nothing, since DRF
+# requires every class to pass; it is how drf-spectacular learns that the JWT is optional, so the schema offers the
+# key without it next to the key with it.
+GUEST_PERMISSIONS = (ChannelAPIKeyPermission, AllowAny)

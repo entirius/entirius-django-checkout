@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- v2 OpenAPI (client-visible, schema only): the guest routes (carts and their steps, `countries/`, `POST orders/`)
+  declare the channel key without the customer JWT next to the key with it. They declared
+  `[{ApiKeyAuth: [], jwtAuth: []}]`, both required, though a guest works with `X-API-KEY` alone, so the schema
+  could not tell them from the customer routes (`orders/list/`, `carts/latest/`, merge), which still need both.
+  Access does not change.
 - v2 API (client-visible): `POST orders/` on a cart that cannot become an order yet answers 409 with the reason in
   `error` (`ADDRESSES_NOT_SELECTED`, `SHIPPING_OPTION_NOT_SELECTED`, `PAYMENT_OPTION_NOT_SELECTED`, `OUT_OF_STOCK`).
   It answered 500 `INTERNAL_ERROR`, because `OrderValidation` raises a v1 exception the v2 handler does not know, so a
