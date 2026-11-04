@@ -8,6 +8,8 @@ The cart keeps the rules there. ``gratis_rules`` is a legacy field nothing fills
 ``is_available: true``.
 """
 
+import pytest
+
 from django_checkout.domain.dto.cart import CheckoutData
 from django_checkout.schemas.responses.cart import CartV2Response
 
@@ -30,3 +32,13 @@ def test_a_cart_without_gift_rules_answers_an_empty_list():
 
     assert gratis.is_available is False
     assert gratis.rules == []
+
+
+@pytest.mark.parametrize("stored", [["GRATIS_STEP", "SECOND"], {"code": "GRATIS_STEP", "sku": ["GIFT-1"]}])
+def test_a_legacy_stored_shape_lists_no_rules(stored):
+    """Old carts keep bare codes or one rule as a dict there; the response must still render."""
+    data = CheckoutData.factory()
+    data.cart.is_gratis_available = True
+    data.cart.available_gratis_rules = stored
+
+    assert CartV2Response.from_domain(data, cart_id="cart", cart_status="new").gratis.rules == []

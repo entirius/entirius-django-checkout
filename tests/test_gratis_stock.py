@@ -32,6 +32,7 @@ from django_checkout.models import (
 from django_checkout.models.discount_mode_of_actions import DiscountModeOfActionType
 from django_checkout.models.supplier import SupplierCustomer
 from django_checkout.services import cart_service
+from django_checkout.services.cart_response_builder import build_v2_cart_response
 from django_checkout.worker.discount_worker import calculate_and_valid_gratis, get_all_available_gratis_rules
 
 TRIGGER_SKU = "ENT-COFFEE-1KG"
@@ -327,3 +328,24 @@ class TestTheCartFlowPassesTheCustomerDown:
         record = _claim_the_gift(channel)
 
         assert [item.sku for item in record.as_data.cart.items] == [TRIGGER_SKU]
+
+
+class TestTheV2CartListsTheOfferedGift:
+    def test_gratis_rules_of_the_v2_cart_name_the_gift(
+        self, channel, supplier, gratis_code, priced_catalog, coffee_in_stock
+    ):
+        """The real cart flow, stored and read back: the v2 cart lists what the gratis-rules endpoint offers."""
+        _stock(channel, supplier, GIFT_SKU, quantity=5)
+        record, _ = cart_service.create_cart(
+            channel=channel,
+            items=[{"sku": TRIGGER_SKU, "quantity": 1}],
+            currency_code="EUR",
+            language_code="en",
+            country_code="PL",
+        )
+        record.refresh_from_db()
+
+        gratis = build_v2_cart_response(record)["gratis"]
+
+        assert gratis["is_available"] is True
+        assert [item["sku"] for rule in gratis["rules"] for item in rule["items"]] == [GIFT_SKU]
