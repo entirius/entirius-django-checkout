@@ -11,7 +11,7 @@ from django_utils.api.responses import ErrorInfo
 from django_checkout.domain.dto.cart import CartRequest, CheckoutData
 from django_checkout.domain.dto.discount import DiscountsRejectedError
 from django_checkout.domain.dto.item import SkuQuantityData
-from django_checkout.domain.payment_selection import is_voucher_method, settling_payment_method
+from django_checkout.domain.payment_selection import covered_by_vouchers, is_voucher_method, settling_payment_method
 from django_checkout.domain.prices import calc_fee_of_price
 from django_checkout.domain.validators.address import validate_addresses
 from django_checkout.domain.validators.cart import check_min_order_price, validate_cart_data
@@ -343,7 +343,7 @@ def process_cart(
 
     if split_order_data:
         fee_price = split_order_data.fee_price
-    elif settling_method and not (voucher_paid > 0 and total <= 0):
+    elif settling_method and not covered_by_vouchers(voucher_paid, total):
         # With the vouchers covering everything the method settles nothing: it is dropped below, its fee with it.
         fee_price = calc_fee_of_price(settling_method, total)
         fee_tax_rate = validated_shipping.tax_rate if validated_shipping else Decimal(0)
@@ -420,7 +420,7 @@ def process_cart(
                     extra=extra,
                 )
             )
-        elif non_voucher_pm and voucher_paid > Decimal("0") and remaining_to_pay <= Decimal("0"):
+        elif non_voucher_pm and covered_by_vouchers(voucher_paid, remaining_to_pay):
             # Voucher covers 100% — drop the now-redundant gateway method(s).
             drop_codes = {getattr(pm, "code", None) for pm in non_voucher_pm}
             payment_methods = [

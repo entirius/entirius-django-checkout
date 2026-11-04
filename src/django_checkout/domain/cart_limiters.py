@@ -30,7 +30,7 @@ def get_product_available(
     """
     products_available = None
     allowed_guest_checkout = True
-    for payment_method in payment_methods or [None]:
+    for payment_method in {method.pk: method for method in payment_methods or []}.values() or [None]:
         products, allowed = LimitedProducts.objects.filter_products_by_limitation(
             sku_list, shipping_method, payment_method, channel, True if customer else False
         )

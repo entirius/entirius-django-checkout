@@ -78,7 +78,8 @@
   a 23.00 voucher on 123.00, courier 10.00 + 5.00 cash on delivery and a 2.00 fee the cart asked 110.00 instead of
   117.00, and `Order.create` already confirmed it as cash on delivery. A gateway's fee is charged in either order;
   when the vouchers cover the whole cart no method settles anything, the cart drops the gateway and charges no fee
-  (`[payu, voucher]` asked 2.00 at PayU for the fee alone).
+  (`[payu, voucher]` asked 2.00 at PayU for the fee alone). The v2 cart's `payment_method` is that method too, with
+  its fee and `is_cash_on_delivery`; a cart with one method shows the same as before.
 - A cart is `valid` only with every `payment_method` entry valid, and product limits set for a shipping and payment
   method pair apply to each of the cart's methods (client-visible). Both read entry `[0]` only: `[payu, voucher]`
   with a voucher code refused as malformed stayed valid (`[voucher, payu]` did not), and a product limited for

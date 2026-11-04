@@ -25,6 +25,7 @@ from rest_framework.test import APIRequestFactory
 from django_checkout.enums import FeeType, PaymentProvider
 from django_checkout.models import Cart, PaymentMethod, ShippingMethod, ShippingOption
 from django_checkout.services import cart_service
+from django_checkout.services.cart_response_builder import build_v2_cart_response
 from django_checkout.signals import compute_cart_voucher_total_signal
 from django_checkout.views.cart import get_or_put_cart
 from tests.test_gratis_stock import (  # noqa: F401 - fixtures
@@ -150,6 +151,17 @@ class TestCashOnDeliveryNextToAVoucher:
         assert data.fee_price == Decimal("2.00")
         assert data.total == Decimal("117.00")  # 123.00 - 23.00 voucher + 15.00 shipping + 2.00 fee
         assert data.validation_status == "valid"
+
+    def test_the_v2_cart_shows_the_method_that_carries_them(self, api_key, shop, voucher_covers):
+        """The v2 response has one ``payment_method``: the one the fee and cash on delivery belong to."""
+        voucher_covers["amount"] = Decimal("23.00")
+        record = _cart(shop, "courier")
+        _pay(api_key, shop, record, "voucher", "cod")
+        record.refresh_from_db()
+
+        payment = build_v2_cart_response(record, [])["payment_method"]
+
+        assert (payment["code"], payment["is_cash_on_delivery"], payment["fee_gross"]) == ("cod", True, "2.00")
 
 
 @pytest.mark.django_db
