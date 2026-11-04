@@ -104,6 +104,10 @@
   still gets the line totals, so a code added and removed leaves the voucher's cover alone.
   `voucher_amount_applied` is never more than the total it reduced (PayPal's `discount` and the voucher's payment
   intent read it; a cart below `min_order_price` no longer counts a voucher's surplus towards it).
+- The cart reports `voucher_not_supported_on_split_order` for the cart it answers with. The rule asked whether the
+  saved cart splits, with the items and `split_order` of the previous save: a PATCH adding the item that splits the
+  cart came back without the error and the PATCH removing it still carried it. The order gate (v1 403, v2 409) is
+  unchanged: it reads the saved cart, which is what the order splits.
 
 - Stripe: a line of several units with a cart discount is charged its discounted total. Its `unit_amount` was the
   unit price less the discount of the whole line, and Stripe multiplies `unit_amount` by the quantity: 3 x 54.99 at
