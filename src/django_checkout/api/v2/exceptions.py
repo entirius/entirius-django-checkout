@@ -233,3 +233,18 @@ def _build_meta(msg) -> dict | None:
         if val is not None:
             meta[attr] = val
     return meta or None
+
+
+class DiscountCodeConflict(APIException):
+    """409: a code the cart applied cannot go into the order; the code is the cart's reason (``DISCOUNT_*``)."""
+
+    status_code = 409
+    default_detail = "A discount code of the cart can no longer be used."
+    default_code = "discount_code_invalid"
+
+    @classmethod
+    def refusing(cls, code: str, reason: str | None) -> "DiscountCodeConflict":
+        return cls(
+            f"Discount code {code} can no longer be used. Review the cart and place the order again.",
+            code=REASON_TO_V2_CODE.get(reason, "DISCOUNT_CODE_INVALID"),
+        )

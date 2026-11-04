@@ -16,7 +16,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
-from django_checkout.api.v2.exceptions import CartNotReadyConflict
+from django_checkout.api.v2.exceptions import CartNotReadyConflict, DiscountCodeConflict
 from django_checkout.api.v2.mixins import CheckoutChannelMixin
 from django_checkout.api.v2.openapi import CHANNEL_PARAM, FILE_PARAM, ORDER_PARAM, PRETTY_ID_PARAM
 from django_checkout.api.v2.permissions import GUEST_PERMISSIONS, ChannelAPIKeyPermission
@@ -24,6 +24,7 @@ from django_checkout.domain.validators.order import CartNotReady
 from django_checkout.models import Order, OrderAttachment
 from django_checkout.schemas.responses.order import OrderCreateResponse, OrderListResponse
 from django_checkout.services import order_service
+from django_checkout.services.discount_usage import DiscountCodeRefused
 from django_checkout.utils import redact_payment_secrets
 
 logger = logging.getLogger("checkout.v2.orders")
@@ -42,8 +43,10 @@ class OrderCreateView(CheckoutChannelMixin, APIView):
             201: OrderCreateResponse,
             409: OpenApiResponse(
                 description=(
-                    "The cart cannot become an order yet. `error` is the reason: `ADDRESSES_NOT_SELECTED`, "
-                    "`SHIPPING_OPTION_NOT_SELECTED`, `PAYMENT_OPTION_NOT_SELECTED` or `OUT_OF_STOCK`."
+                    "The cart cannot become an order yet, or a discount code it applied can no longer be used; "
+                    "nothing is ordered. `error` is the reason: `ADDRESSES_NOT_SELECTED`, `SHIPPING_OPTION_NOT_SELECTED`, "
+                    "`PAYMENT_OPTION_NOT_SELECTED`, `OUT_OF_STOCK`, or a `DISCOUNT_*` code as in the cart's `_errors` "
+                    "(`DISCOUNT_USAGE_LIMIT_REACHED`, `DISCOUNT_PER_USER_LIMIT_REACHED`, `DISCOUNT_EXPIRED`, ...)."
                 )
             ),
         },
@@ -68,6 +71,8 @@ class OrderCreateView(CheckoutChannelMixin, APIView):
         except CartNotReady as exc:
             # ``status`` may name a SKU after the code ("OUT_OF_STOCK sku: X"); the message names it too.
             raise CartNotReadyConflict(exc.message, code=exc.status.split()[0]) from exc
+        except DiscountCodeRefused as exc:
+            raise DiscountCodeConflict.refusing(exc.code, exc.reason) from exc
 
         response = OrderCreateResponse(
             order_id=str(result.order.order_id) if result.order else "",

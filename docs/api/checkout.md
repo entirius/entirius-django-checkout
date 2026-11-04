@@ -1936,7 +1936,10 @@ v2 price fields use explicit gross/net naming (aligned with Matrix v2).
 A cart write (create, PATCH items / addresses / discounts / shipping / payment, merge) answers 200/201 with the full
 cart; what went wrong in it is listed under `_errors` (the key is absent when nothing did). Each detail is
 `{scope, field, code, message, meta}`; branch on `code`, `message` is generic English text. Reads (GET) carry no
-`_errors`, and `POST orders/` does not report discount codes: a rejected code is simply not in the order.
+`_errors`. `POST orders/` refuses the order when a code the cart holds no longer applies (another order took its
+last use, the address reached `max_uses_per_user`, it expired, ...): 409 with the code's reason from the table below
+as `error` (`DISCOUNT_USAGE_LIMIT_REACHED`, ...) and the code in `message`. Nothing is ordered and the cart keeps the
+code; the next discounts PATCH drops it and lists it under `_errors`, and the order then goes through at the new total.
 
 Rejected discount codes give `ONE_OR_MORE_DISCOUNT_INVALID` (`field: "cart.discounts.code"`, as before) and then one
 detail per rejected code. `field` is `codes[i].code`, `i` being the code's place among the codes sent (the
@@ -1969,3 +1972,14 @@ detail per rejected code. `field` is `codes[i].code`, `i` being the code's place
 
 The meta never carries rule internals (priority, ids, usage counters). v1 responses are unchanged: v1 still gets
 only `one_or_more_discount_invalid` with `affected_values`.
+
+### Code usage
+
+An order, v1 or v2, counts each code it took on `current_used` and writes one `UsedCoupon` row per code with the
+order's e-mail addresses, in the order's transaction. `max_used` is checked against the counter. `max_uses_per_user`
+is checked against the `UsedCoupon` rows of orders in `ORDER_STATUSES_QUALIFIED_TO_DISCOUNT_MAX_PER_USER` (default:
+completed, returned, canceled), matched by e-mail: the account e-mail of a logged-in customer, the address e-mail of
+a guest cart. A cancelled order keeps its use. Of two orders racing for the last use one takes it and the other is
+not saved (v2 409 `DISCOUNT_USAGE_LIMIT_REACHED`, v1 403 `INVALID_REQUEST`). An automatic rule applies whatever its
+code's counter says, so its code counts up to `max_used` and then stops counting; it never refuses an order. A v1
+order whose code no longer applies is still placed without it.
