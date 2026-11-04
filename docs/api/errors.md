@@ -124,6 +124,18 @@
     {"status": "ADDRESSES_NOT_SELECTED", "message": "There is no addresses in this cart c230fc10-a122-42b1-9b1a-76e69dcb12e9"} status=403
     {"status": "SHIPPING_OPTION_NOT_SELECTED", "message": "There is no shipping method in this cart 0213cf48-906e-4512-aedf-3d2c15ac4f91"} status=403
     {"status": "PAYMENT_OPTION_NOT_SELECTED", "message": "There is no payment method in this cart 0213cf48-906e-4512-aedf-3d2c15ac4f91"} status=403
+    {"status": "VOUCHER_NOT_SUPPORTED_ON_SPLIT_ORDER", "message": "This cart splits into 2 orders and a voucher cannot pay for several orders. Remove the voucher, or the items that split the cart, to continue."} status=403
 
 ```
 
+# CUSTOMER ERASURE
+
+`DELETE /api-admin/checkout/1/{channel}/customer/delete` (docs/api/checkout.md, "Customer erasure"):
+
+```
+    {"status": "BAD_REQUEST", "message": "Email is required"} status=400
+    {"status": "OPEN_ORDERS", "message": "The customer has orders that are not fulfilled yet; nothing was anonymized. Cancel or finish the listed orders, then erase again"} status=409
+        data: {"deleted": false, "blocking_orders": [{"order_id": "<uuid>", "pretty_id": "0100000042", "status": "confirmed"}]}
+    {"status": "NOT_FOUND", "message": "No data found for this customer"} status=404
+    {"status": "BAD_REQUEST", "message": "Customer data in orders anonymization failed"} status=400
+```

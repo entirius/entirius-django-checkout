@@ -12,7 +12,7 @@ from django_checkout.domain.dto.cart import CartData
 from django_checkout.domain.dto.discount import DiscountData, GratisRules
 from django_checkout.domain.dto.discount_items import DiscountItems
 from django_checkout.domain.dto.item import GratisData, ValidatedItemData
-from django_checkout.domain.quantities import filter_saleable_skus
+from django_checkout.domain.quantities import fetch_quantities, filter_saleable_skus
 from django_checkout.domain.validators.discounts import validate_discounts
 from django_checkout.enums import ItemStatus
 from django_checkout.models import (
@@ -561,39 +561,38 @@ def calculate_items_total_price(cart_data: CartData | DiscountItems, filtered_sk
     return all_price
 
 
-def get_item_by_price(cart_data: CartData | DiscountItems, filtered_skus, get_type: str):
-    filtered_skus = [
-        (item.sku, item.unit_price, item.quantity) for item in cart_data.get_valid_items() if item.sku in filtered_skus
+def get_item_by_price(cart_data: CartData | DiscountItems, filtered_skus, get_type: str) -> str | None:
+    """The SKU of the cheapest (``lowest``) or the most expensive (``highest``) bought line, more units on a tie.
+
+    Gift lines are left out: they cost the gift price, so they would always be the cheapest.
+    """
+    sign = 1 if get_type == "lowest" else -1
+    lines = [
+        item
+        for item in cart_data.get_valid_items()
+        if item.sku in filtered_skus and not getattr(item, "is_gratis", False)
     ]
-    sorted_list = None
-    sku = None
-    if get_type == "lowest":
-        sorted_list = sorted(filtered_skus, key=lambda x: x[1])
-    elif get_type == "highest":
-        sorted_list = sorted(filtered_skus, key=lambda x: x[1], reverse=True)
-    sorted_list = sorted(sorted_list, key=lambda x: x[2], reverse=True)
-    if sorted_list:
-        sku = sorted_list[0][0]
-    return sku
+    if not lines:
+        return None
+    return min(lines, key=lambda item: (sign * item.unit_price, -item.quantity)).sku
 
 
 def validate_discount_target(discount: DiscountRuleCode, customer):
     pass
 
 
-def calculate_discount_when_gratis(item, how_many_products_gratis):
+def calculate_discount_when_gratis(item, how_many_products_gratis, channel=None) -> Decimal:
+    """The discount that brings ``how_many_products_gratis`` units of the item down to the gift price.
+
+    Gross, or net on a channel that discounts net prices. The gift price follows GRATIS_MECHANISM, as for a
+    picked gift, and is never above the item's own price.
+    """
     percent_price = round(item.unit_price * Decimal((100 - GRATIS_PERCENT_DISCOUNT) / 100), 2)
-
-    if percent_price > GRATIS_PRICE:
-        final_price_gratis = percent_price
-    else:
-        final_price_gratis = GRATIS_PRICE
-
-    item.discount_amount = item.discount_amount + Decimal(
-        round((Decimal(how_many_products_gratis) * item.unit_price), 2)
-        - (Decimal(how_many_products_gratis) * final_price_gratis)
-    )
-    return item
+    gift_price = Decimal(GRATIS_PRICE) if GRATIS_MECHANISM == 2 else max(percent_price, Decimal(GRATIS_PRICE))
+    discount = round(Decimal(how_many_products_gratis) * max(item.unit_price - gift_price, Decimal(0)), 2)
+    if channel and channel.discount_apply_type == DiscountApplyType.BEFORE:
+        return round(discount / (1 + Decimal(item.tax_rate or 0)), 2)
+    return discount
 
 
 def check_is_gratis_allowed(cart_data, discount):
@@ -691,13 +690,12 @@ def calculate_discounts_modifiers(
     else:
         total_price = cart_data.total_price
 
-    sku_the_cheapest = None
-    if discount.modifier == ModifiersForDiscountRule.CHEAPEST_GRATIS:
-        sku_the_cheapest = get_item_by_price(cart_data, filtered_skus, "lowest")
-
-    sku_the_most_expensive = None
-    if discount.modifier == ModifiersForDiscountRule.MOST_EXPENSIVE_GRATIS:
-        sku_the_most_expensive = get_item_by_price(cart_data, filtered_skus, "highest")
+    # CHEAPEST / MOST_EXPENSIVE_GRATIS: the bought line picked by price and how many of its units are left to give.
+    gratis_sku, gratis_units_left = None, Decimal(0)
+    if discount.modifier in (ModifiersForDiscountRule.CHEAPEST_GRATIS, ModifiersForDiscountRule.MOST_EXPENSIVE_GRATIS):
+        lowest = discount.modifier == ModifiersForDiscountRule.CHEAPEST_GRATIS
+        gratis_sku = get_item_by_price(cart_data, filtered_skus, "lowest" if lowest else "highest")
+        gratis_units_left = Decimal(get_value_for_currency(discount.extra_value, currency_code) or 0)
     cart_data.discounts[discount_idx].item_code = list(set(filtered_skus))
 
     if discount.modifier in [
@@ -861,25 +859,11 @@ def calculate_discounts_modifiers(
                         )
                         cart_data.discounts[discount_idx].percent_discount = closest_threshold
 
-            case ModifiersForDiscountRule.CHEAPEST_GRATIS:
-                gratis_qty = get_value_for_currency(discount.extra_value, currency_code)
-                if gratis_qty is not None and sku_the_cheapest:
-                    if item.sku == sku_the_cheapest:
-                        if item.quantity < gratis_qty:
-                            how_many_cheapest_products_gratis = item.quantity
-                        else:
-                            how_many_cheapest_products_gratis = gratis_qty
-                        item = calculate_discount_when_gratis(item, how_many_cheapest_products_gratis)
-
-            case ModifiersForDiscountRule.MOST_EXPENSIVE_GRATIS:
-                gratis_qty = get_value_for_currency(discount.extra_value, currency_code)
-                if gratis_qty is not None and sku_the_most_expensive:
-                    if item.sku == sku_the_most_expensive:
-                        if item.quantity < gratis_qty:
-                            how_many_expensive_products_gratis = item.quantity
-                        else:
-                            how_many_expensive_products_gratis = gratis_qty
-                        item = calculate_discount_when_gratis(item, how_many_expensive_products_gratis)
+            case ModifiersForDiscountRule.CHEAPEST_GRATIS | ModifiersForDiscountRule.MOST_EXPENSIVE_GRATIS:
+                if item.sku == gratis_sku and not is_gratis and gratis_units_left > 0:
+                    units = min(item.quantity, gratis_units_left)
+                    gratis_units_left -= units
+                    discount_amount = discount_amount + calculate_discount_when_gratis(item, units, channel)
             case _:
                 break
 
@@ -956,6 +940,23 @@ def calculate_discounts_modifiers(
     return cart_data
 
 
+def gift_fits_the_stock(cart_data, sku, quantity, channel, customer=None) -> bool:
+    """The gift and the bought units of its SKU fit the saleable stock together.
+
+    A gift of a SKU the customer also buys is a line of its own, and validate_items checks each line
+    against the stock alone, so the sum is checked here.
+    """
+    stock = fetch_quantities([sku], channel, customer).get(sku, {})
+    if not stock.get("is_saleable"):
+        return False
+    bought = sum(
+        Decimal(item.quantity or 0)
+        for item in getattr(cart_data, "items", None) or []
+        if item.sku == sku and not getattr(item, "is_gratis", False)
+    )
+    return bought + Decimal(quantity or 0) <= stock.get("saleable_quantity", 0)
+
+
 def calculate_and_valid_gratis(
     discount: DiscountRuleCode, cart_data: CartData, channel=None, discount_idx=0, currency_code=None, customer=None
 ):
@@ -1002,7 +1003,7 @@ def calculate_and_valid_gratis(
     skus_allowed_to_gratis = products_allowed_to_gratis.values_list("real_product__sku", flat=True)
     picked_sku = cart_data.discounts[discount_idx].sku
     picked_quantity = cart_data.discounts[discount_idx].quantity
-    if picked_sku and not filter_saleable_skus([picked_sku], channel, customer):
+    if picked_sku and not gift_fits_the_stock(cart_data, picked_sku, picked_quantity, channel, customer):
         cart_data.discounts[discount_idx].status = ItemStatus.INVALID
         return None
     if discount.modifier == ModifiersForDiscountRule.GRATIS_BY_SKU_IN_CART:

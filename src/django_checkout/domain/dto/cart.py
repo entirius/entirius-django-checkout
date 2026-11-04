@@ -139,10 +139,15 @@ class CartRequest:
             language_code=None,
             currency_code=None,
             country_code=None,
+            custom_order_id=None,
+            requested_delivery_date=None,
+            split_order=None,
             split_by_feature_idx=None,
             split_by_attr_idx=None,
             original_order_id=None,
             comment=None,
+            affiliate_code=None,
+            customer_ip=None,
         )
 
 

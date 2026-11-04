@@ -2,18 +2,20 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+import hmac
 import json
 
 from django.core.handlers.wsgi import WSGIRequest
+from django.db import transaction
 from django.views.decorators.csrf import csrf_exempt
 from django_utils.api.decorators import api_view, require_http_method
 from django_utils.api.responses import Response
 from paynow_sdk import PayNow
 from process_logger import ProcessLogger
 
-from django_checkout.domain.reservation import release_stock_reservation
-from django_checkout.enums import OrderStatus, PaymentIntentStatus
-from django_checkout.models import Order, PaymentIntent
+from django_checkout.domain.payment_provider.notification_state import apply_payment_status, lock_payment_intent
+from django_checkout.enums import PaymentIntentStatus, PaymentProvider
+from django_checkout.models import PaymentIntent
 
 from ...bi import Checkout_PayNowNotifyEvent
 
@@ -61,6 +63,15 @@ def paynow_notify(request: WSGIRequest, *args, **kwargs):
         bev.finish_with_error(finish_tag="Can not find related PaymentIntent object", details=extra)
         return Response(data={"message": "For more information see log"}, status="FAIL", status_code=404)
 
+    # The paymentId comes from the request: it may name another gateway's payment.
+    if payment_intent.method is None or payment_intent.method.provider != PaymentProvider.PAYNOW:
+        extra = {"paynow_order_id": paynow_order_id, "payment_intent_pk": payment_intent.pk, "is_status_changed": False}
+        logger_process.add_log_param_once("paynow_order_id", paynow_order_id)
+        logger_process.add_log_param_once("payment_intent_pk", payment_intent.pk)
+        logger_process.error("PaymentIntent is not a PayNow payment, notification ignored")
+        bev.finish_with_error(finish_tag="PayNow notification rejected", details=extra)
+        return Response(data={"message": "For more information see log"}, status="FAIL", status_code=404)
+
     # Validation: do we have valid status field in response?
     if "status" not in body:
         extra = {"paynow_order_id": paynow_order_id, "paynow_response": body, "is_status_changed": False}
@@ -87,7 +98,7 @@ def paynow_notify(request: WSGIRequest, *args, **kwargs):
     signature_header = request.headers.get("Signature")
     signature_calculated = paynow.authorization.calculate_signature(body=body, parameters={}, is_notification=True)
 
-    if not signature_header or signature_calculated != signature_header:
+    if not signature_header or not hmac.compare_digest(signature_calculated.encode(), signature_header.encode()):
         extra = {"paynow_order_id": paynow_order_id, "paynow_response": body, "is_status_changed": False}
         logger_process.add_log_param("paynow_order_id", paynow_order_id)
         logger_process.add_log_param("paynow_response", body)
@@ -98,91 +109,50 @@ def paynow_notify(request: WSGIRequest, *args, **kwargs):
         return Response(data={"message": "For more information see log"}, status="FAIL", status_code=404)
 
     # Business Logic
-    payment_intent.provider_notify = body
-    extra = {
-        "order_id": payment_intent.order.order_id,
-        "payment_intent_pk": payment_intent.pk,
-        "paynow_order_id": paynow_order_id,
-        "payment_status_prev": payment_intent.payment_status,
-        "payment_status": None,
-        "order_status_prev": payment_intent.order.order_status,
-        "order_status": None,
-        "is_status_changed": None,
-    }
-    logger_process.set_log_params({"details": extra})
+    with transaction.atomic():
+        payment_intent = lock_payment_intent(payment_intent)
+        extra = {
+            "order_id": payment_intent.order.order_id,
+            "payment_intent_pk": payment_intent.pk,
+            "paynow_order_id": paynow_order_id,
+            "payment_status_prev": payment_intent.payment_status,
+            "payment_status": None,
+            "order_status_prev": payment_intent.order.order_status,
+            "order_status": None,
+            "is_status_changed": None,
+        }
+        logger_process.set_log_params({"details": extra})
+        payment_intent.provider_notify = body
+        outcome = apply_payment_status(payment_intent, _INTENT_STATUS.get(body["status"], PaymentIntentStatus.ERROR))
 
-    if body["status"] == "PENDING" or body["status"] == "NEW":
-        extra["order_status"] = payment_intent.order.order_status
-        extra["payment_status"] = payment_intent.payment_status
-        logger_process.add_log_param("order_status", payment_intent.order.order_status)
-        logger_process.add_log_param("payment_status", payment_intent.payment_status)
-        if payment_intent.payment_status in [PaymentIntentStatus.COMPLETE]:
-            logger_process.info("PaymentIntent status is already set to COMPLETE, no changes made")
-            return Response(data={})
-
-        # jesli payment jest PENDING
-        # to nie ma to wpływu na zamówienie
-        payment_intent.payment_status = PaymentIntentStatus.PENDING
-        payment_intent.save()
-        logger_process.add_log_param("is_status_changed", True)
-        logger_process.info("PaymentIntent status is set to PENDING")
-        extra["is_status_changed"] = True
-        bev.finish_with_success(finish_tag="PaymentIntent status is set to PENDING", details=extra)
-        return Response(data={})
-
-    elif body["status"] == "REJECTED":
-        # jesli payment jest CANCELED
-        # to zamówienie jest zamykane
-        is_status_changed = payment_intent.payment_status != PaymentIntentStatus.CANCELLED
-        payment_intent.payment_status = PaymentIntentStatus.CANCELLED
-        if is_status_changed:
-            release_stock_reservation(payment_intent.order)
-        payment_intent.save()
-        order: Order = payment_intent.order
-        order.order_status = OrderStatus.CANCELED
-        order.save()
-        logger_process.add_log_param("is_status_changed", is_status_changed)
-        logger_process.add_log_param("order_status", payment_intent.order.order_status)
-        logger_process.add_log_param("payment_status", payment_intent.payment_status)
-        logger_process.info("PaymentIntent status is set to CANCELED")
-        extra["is_status_changed"] = is_status_changed
-        extra["order_status"] = payment_intent.order.order_status
-        extra["payment_status"] = payment_intent.payment_status
-        bev.finish_with_success(finish_tag="PaymentIntent status is set to CANCELED", details=extra)
-        return Response(data={})
-
-    elif body["status"] == "CONFIRMED":
-        # jesli payment jest COMPLETED
-        # to ustawiamy status zamówienia na CONFIRMED
-        payment_intent.payment_status = PaymentIntentStatus.COMPLETE
-        payment_intent.save()
-        order: Order = payment_intent.order
-        order.order_status = OrderStatus.CONFIRMED
-        # order.in_status_since = timezone.now() # jest autoustawianie Order.in_status_since w save()
-        order.save()
-        logger_process.add_log_param("is_status_changed", True)
-        logger_process.add_log_param("order_status", payment_intent.order.order_status)
-        logger_process.add_log_param("payment_status", payment_intent.payment_status)
-        logger_process.info("PaymentIntent status is set to COMPLETE, Order status is set to CONFIRMED")
-        extra["is_status_changed"] = True
-        extra["order_status"] = payment_intent.order.order_status
-        extra["payment_status"] = payment_intent.payment_status
-        bev.finish_with_success(
-            finish_tag="PaymentIntent statuet to COMPLETE, Order status is set to CONFIRMED", details=extra
-        )
-        return Response(data={})
-
-    # Nieobsłużone przypadki
-    payment_intent.payment_status = PaymentIntentStatus.ERROR
-    payment_intent.save()
-    logger_process.add_log_param("is_status_changed", True)
-    logger_process.add_log_param("order_status", payment_intent.order.order_status)
-    logger_process.add_log_param("payment_status", payment_intent.payment_status)
-    logger_process.add_log_param("unsupported_payment_status", body["status"])
-    logger_process.error("Unsupported PayNow payment_status, PaymentIntent status is set to error")
-    extra["is_status_changed"] = True
+    extra["is_status_changed"] = outcome.changed
     extra["order_status"] = payment_intent.order.order_status
     extra["payment_status"] = payment_intent.payment_status
-    extra["unsupported_payment_status"] = body["status"]
-    bev.finish_with_success(finish_tag="Unsupported PayNow payment_status", details=extra)
+    logger_process.add_log_param("is_status_changed", outcome.changed)
+    logger_process.add_log_param("order_status", payment_intent.order.order_status)
+    logger_process.add_log_param("payment_status", payment_intent.payment_status)
+    if outcome.applied and body["status"] not in _INTENT_STATUS:
+        extra["unsupported_payment_status"] = body["status"]
+        logger_process.add_log_param("unsupported_payment_status", body["status"])
+        logger_process.error("Unsupported PayNow payment_status, PaymentIntent status is set to error")
+        bev.finish_with_success(finish_tag="Unsupported PayNow payment_status", details=extra)
+        return Response(data={})
+
+    logger_process.info(outcome.message)
+    bev.finish_with_success(finish_tag=_LEGACY_FINISH_TAG.get(outcome.message, outcome.message), details=extra)
     return Response(data={})
+
+
+# Paynow status -> PaymentIntent status it stands for; anything else is an error.
+_INTENT_STATUS = {
+    "NEW": PaymentIntentStatus.PENDING,
+    "PENDING": PaymentIntentStatus.PENDING,
+    "REJECTED": PaymentIntentStatus.CANCELLED,
+    "CONFIRMED": PaymentIntentStatus.COMPLETE,
+}
+# BI reports group by finish tag, and Paynow's confirmation always carried this wording.
+_LEGACY_FINISH_TAG = {
+    "PaymentIntent status is set to COMPLETE, Order status is set to CONFIRMED": (
+        "PaymentIntent statuet to COMPLETE, Order status is set to CONFIRMED"
+    ),
+}

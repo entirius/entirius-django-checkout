@@ -37,18 +37,15 @@ class PayUBlikPaymentProvider(PayUPaymentProvider, ProcessLoggerMixin):
             else self.payment_method.channel.default_currency.iso3.upper()
         )
 
-        blik_code = None
-        if hasattr(order_dto.payment_method, "pay_code"):
-            blik_code = order_dto.primary_payment_method.pay_code
+        # Its own entry: payment_method is a list, and entry [0] may be a voucher whose pay_code holds voucher codes.
+        blik_code = getattr(self.own_payment_data(order_dto), "pay_code", None)
 
         pay_methods = PayUPayMethods.factory("BLIK_AUTHORIZATION_CODE", blik_code) if blik_code else None
 
         return PayUOrder(
             extOrderId=order.pretty_id,
             notifyUrl=self.get_notify_url(),
-            continueUrl=self.resolve_continue_url(
-                order_dto.primary_payment_method.add_order_id_to_continue_url(order.pretty_id), order
-            ),
+            continueUrl=self.resolve_own_continue_url(order, order_dto),
             customerIp=self.get_client_ip(),
             merchantPosId=self.payment_method.additional_data["pos_id"],
             description=f"BLIK Order: {order.pretty_id}",
@@ -84,7 +81,7 @@ class PayUBlikPaymentProvider(PayUPaymentProvider, ProcessLoggerMixin):
         try:
             self.provider_request = self.build_payu_data(order, cart)
             order_id, *_ = payu.create_order(self.provider_request)
-            self.redirect_url = order_dto.primary_payment_method.add_order_id_to_continue_url(order.pretty_id)
+            self.redirect_url = self.own_payment_data(order_dto).add_order_id_to_continue_url(order.pretty_id)
             self.order_id = order_id
             return order_id
         except Exception as e:

@@ -81,6 +81,7 @@ src/django_checkout/
 │   ├── cart_service.py      # Cart CRUD + sub-resource patches
 │   ├── cart_response_builder.py  # Domain -> v2 response translation
 │   ├── order_service.py     # v2 order create/list
+│   ├── discount_usage.py    # code usage of an order (v1 + v2): counters, UsedCoupon rows
 │   ├── customer.py          # Customer anonymization
 │   └── stock_sync_service.py # QMS warehouse sync
 ├── worker/                  # Discount calculation, order splitting
@@ -132,5 +133,37 @@ toggles and defaults: `docs/configuration.md`.
   A pinned erase token anonymises only its channel's orders and carts (`erase_channel`); an unpinned one every channel.
 - Payment throttles (`utils/api/throttling.py`): the ident is DRF's `get_ident` when `NUM_PROXIES` is set, the TCP
   peer otherwise, plus the cart id where the request names one. Behind a proxy `NUM_PROXIES` must be set.
+- `payment_method` is a list (`[voucher, gateway]`): a provider reads its own entry (`own_payment_data`), never
+  `primary_payment_method`; which method settles the rest and that vouchers are debited first live in
+  `domain/payment_selection.py`. The method that settles the rest carries the cart's fee and cash on delivery
+  (`process_cart`, `Order.create`) and its PaymentIntent the status the payment bridge reports
+  (`settling_payment_intent`; never `payment_items.first()`); the cart status and product limits read every entry. A voucher on a cart that splits is refused (`voucher_not_supported_on_split_order`):
+  split parts are created with the gateway alone.
 - PayU notifications need `second_key` in the method's `additional_data` (403 without it); `checks.py` reports
   PayU methods that lack it as `django_checkout.W001` (database-tagged: `manage.py check --database default`).
+- PayPal notifications need `webhook_id` in the method's `additional_data` and are verified by PayPal's
+  verify-webhook-signature postback (403 without the id, on a failed or unreachable check, or for a non-PayPal
+  payment); `checks.py` reports PayPal methods that lack it as `django_checkout.W002`.
+- Gateway statuses go through `domain/payment_provider/notification_state.py` (`apply_payment_status` under
+  `lock_payment_intent`): COMPLETE is final, CANCELLED yields only to COMPLETE, orders are confirmed / cancelled only
+  while they await payment. BI finish tags are grouped on in reports: keep their wording (`describe`).
+- Erasure (`services/customer.py` → `Order.anonymize` / `Cart.anonymize`, table in `docs/api/checkout.md`) covers
+  every personal field checkout stores. A new one goes into the scrub with it: body fields in `utils` (`_PII_FIELDS`,
+  `_BODY_PII_FIELDS`), columns and related rows in `Order.anonymize`.
+  `CustomerService.anonymize_customer` refuses (`ErasureBlocked`, v1 409 `OPEN_ORDERS`) before writing anything while
+  one of the orders is outside `SETTLED_ORDER_STATUSES`: the check lives in the service so every entry point gets it.
+  `complete-erasures` calls `anonymize()` itself and is never refused. Integrators erase in checkout before deleting
+  the account in `django_accounts`; the other way round orders are found only by the e-mails they hold. The
+  customer's rows are found by fixed fields (account, e-mail columns, address e-mails, used codes), never by a body
+  search: another customer's row that holds the e-mail elsewhere only gets that e-mail replaced
+  (`utils.anonymize_email_in_body`, on a locked fresh row), and it never refuses the erasure.
+- Gateway payloads (`PaymentIntent.provider_request` / `provider_notify`) are stored through the allowlist in
+  `utils/gateway_payload.py` on every `save()`; erasure scrubs rows stored before. A key a reader needs goes into
+  `_KEPT_KEYS` with its reason and a test; anything else is dropped. Verify a signature on the raw request, never on
+  the stored copy, and log a payload that can hold the buyer only through `scrub_gateway_payload`. A queryset
+  `.update()`, `bulk_create` or `loaddata` of these fields bypasses the scrub: do not write them that way.
+- A discount code is unique per (channel, currency), a rule without currencies covering every currency
+  (`services/code_clashes.py`, `docs/api/discounts.md`). Every write path (v2 admin service, Django admin forms,
+  `import-discount-rules`) calls `refuse_clash` / `refuse_scope_change`; a new one must too. No DB constraint
+  (channels and currencies are M2M): stored clashes keep working and the `checkout.discount_codes` check
+  (`entirius_config`, shown by munin) lists them.

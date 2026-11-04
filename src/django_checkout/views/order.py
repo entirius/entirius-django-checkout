@@ -7,7 +7,7 @@ import os
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
-from django.db.models import F, Prefetch, Q
+from django.db.models import Prefetch, Q
 from django.http import HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django_utils.api.decorators import (
@@ -24,16 +24,16 @@ from process_logger import ProcessLogger
 
 from django_checkout.domain.cart import process_cart
 from django_checkout.domain.dto.order import OrderParams, OrderRequest
-from django_checkout.domain.validators.order import OrderValidation
+from django_checkout.domain.validators.order import OrderValidation, refuse_voucher_on_split_order
 from django_checkout.enums import OrderStatus
 from django_checkout.models import (
     Cart,
-    DiscountCode,
     Order,
     OrderAttachment,
     OrderStatusLabel,
     ShippingIntent,
 )
+from django_checkout.services.discount_usage import use_discounts
 from django_checkout.settings import CHECKOUT_USE_ISO_DATETIME_FORMAT
 from django_checkout.utils import redact_payment_secrets
 from django_checkout.utils.api.decorators import channel_view
@@ -61,6 +61,11 @@ def _with_related(orders):
     )
 
 
+def _customer_ref(customer) -> int | None:
+    """The customer in a log line: the pk, since ``str(customer)`` is the username, which is the e-mail."""
+    return customer.pk if customer is not None else None
+
+
 @csrf_exempt
 @channel_view
 @require_http_method("POST", "GET")
@@ -78,16 +83,16 @@ def order_view(request, *args, **kwargs):
             cart_id = body.cart_id
             cart = Cart.objects.get(channel=request.channel, cart_id=body.cart_id, customer=customer)
         except ObjectDoesNotExist as e:
-            extra = {"request_body": str(body), "error_message": str(e), "customer": str(customer)}
+            extra = {"request_body": str(body), "error_message": str(e), "customer": _customer_ref(customer)}
             logger_process.add_log_param_once("request_body", str(body))
-            logger_process.add_log_param_once("customer", str(customer))
+            logger_process.add_log_param_once("customer", _customer_ref(customer))
             logger_process.error("Order creation failed: cart does not exist.")
             bev.finish_with_error(finish_tag="Order creation failed: cart does not exist.", details=extra)
             raise BadRequest("Cart does not exist")
         except Exception as e:
-            extra = {"request_body": str(body), "error_message": str(e), "customer": str(customer)}
+            extra = {"request_body": str(body), "error_message": str(e), "customer": _customer_ref(customer)}
             logger_process.add_log_param_once("request_body", str(body))
-            logger_process.add_log_param_once("customer", str(customer))
+            logger_process.add_log_param_once("customer", _customer_ref(customer))
             logger_process.exception(e)
             bev.finish_with_exception(details=extra, e=e)
             raise Forbidden("Unknown error")
@@ -107,19 +112,21 @@ def order_view(request, *args, **kwargs):
                 is_order_creation=True,
             )
             OrderValidation.validate(cart_id, processed_data)
+            refuse_voucher_on_split_order(message)
 
             # Splitting order
             items_to_split, len_parts = check_that_order_can_be_split(cart, request.channel)
 
-            if not len_parts or not len_parts > 1:
-                order, redirect, payment_error = Order.create(
-                    processed_data, cart, request.channel, customer=customer, request=request
-                )
-            split_orders_pretty_id = []
-            if len_parts:
-                if len_parts > 1:
-                    # Jeżeli order może być podzielony na więcej niż jedną część, to dzieli i zapisuje w bazie
-                    with transaction.atomic():
+            # The order and its code uses commit together: an order that cannot take a code is not saved.
+            with transaction.atomic():
+                if not len_parts or not len_parts > 1:
+                    order, redirect, payment_error = Order.create(
+                        processed_data, cart, request.channel, customer=customer, request=request
+                    )
+                split_orders_pretty_id = []
+                if len_parts:
+                    if len_parts > 1:
+                        # Jeżeli order może być podzielony na więcej niż jedną część, to dzieli i zapisuje w bazie
                         split_orders_pretty_id, (order, redirect_split, payment_error) = split_orders_by_attribute(
                             processed_data,
                             request.channel,
@@ -132,15 +139,15 @@ def order_view(request, *args, **kwargs):
                         )
                         if redirect_split:
                             redirect = redirect_split
-                elif len_parts == 1:
-                    # Jeżeli order może być podzielony na jedynie jedną część,
-                    # to go nie dzieli i oznacza w zamówieniu głównym, jakim atrybutem miał być dzielony
-                    split_by_attr_idx, split_by_feature_idx = tuple(list(items_to_split)[0])
-                    cart.cart_body["split_by_attr_idx"] = str(split_by_attr_idx) if split_by_attr_idx else None
-                    cart.cart_body["split_by_feature_idx"] = str(split_by_feature_idx)
-                    cart.save()
+                    elif len_parts == 1:
+                        # Jeżeli order może być podzielony na jedynie jedną część,
+                        # to go nie dzieli i oznacza w zamówieniu głównym, jakim atrybutem miał być dzielony
+                        split_by_attr_idx, split_by_feature_idx = tuple(list(items_to_split)[0])
+                        cart.cart_body["split_by_attr_idx"] = str(split_by_attr_idx) if split_by_attr_idx else None
+                        cart.cart_body["split_by_feature_idx"] = str(split_by_feature_idx)
+                        cart.save()
 
-            use_discounts(order.order_body["cart"]["discounts"], request.channel, order=order)
+                use_discounts(order.order_body["cart"]["discounts"], request.channel, order=order)
             status_label = order.order_status
             try:
                 status_label_obj = OrderStatusLabel.objects.get(status=order.order_status, channel=request.channel)
@@ -408,51 +415,3 @@ def get_order_attachment(request, channel_idx=None, order_id=None, file_id=None,
             response["Access-Control-Expose-Headers"] = "x-filename"
             return response
     raise NotFound(message="File does't exists", status="file_doesnt_exists")
-
-
-def use_discounts(discounts: list, channel, order=None):
-    """
-    Zwiększa licznik użyć kodów rabatowych i zapisuje użycie w tabeli UsedCoupon.
-
-    Args:
-        discounts: Lista użytych rabatów z order_body['cart']['discounts']
-        channel: Channel w którym utworzono zamówienie
-        order: Order object - potrzebny do zapisania UsedCoupon
-    """
-    from django_checkout.models import UsedCoupon
-
-    for discount in discounts:
-        code = discount.get("code")
-        if not code:
-            continue
-
-        try:
-            discount_code_obj = DiscountCode.objects.get(code=code)
-            discount_code_obj.current_used = F("current_used") + 1
-            discount_code_obj.save()
-        except DiscountCode.DoesNotExist:
-            # nie dodawaj, bo jest to kod automatyczny, który nie ma ilość użyć
-            pass
-
-        if order:
-            billing_email = order.billing_email
-            shipping_email = order.shipping_email
-
-            if not billing_email:
-                if order.customer and hasattr(order.customer, "user"):
-                    billing_email = order.customer.user.email
-                elif order.order_body.get("addresses", {}).get("billing_address", {}).get("email"):
-                    billing_email = order.order_body["addresses"]["billing_address"]["email"]
-
-            if not shipping_email and order.order_body.get("addresses", {}).get("shipping_address", {}).get("email"):
-                shipping_email = order.order_body["addresses"]["shipping_address"]["email"]
-
-            if billing_email or shipping_email:
-                UsedCoupon.objects.create(
-                    channel=channel,
-                    order=order,
-                    customer=order.customer,
-                    billing_email=billing_email or "",
-                    shipping_email=shipping_email or "",
-                    discount_code=code,
-                )

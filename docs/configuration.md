@@ -12,7 +12,7 @@ Key toggles (defaults in parentheses): `USE_PRICE_TUNER_IN_CHECKOUT` (False),
 `USE_VALIDATE_ITEMS_SIGNAL` (True), `USE_VALIDATE_VOUCHERS_SIGNAL` (False — flip to True in
 services that install django-checkout-voucher), `CUSTOMS_THRESHOLD_ENABLED` (False),
 `USE_CACHED_VIEWS` (False), `ADD_MAX_AVAILABLE_QUANTITY` (True), `GRATIS_MECHANISM` (1),
-`AUTOPAY_HASH_KEY` (None), `GLOBAL_STOCK_RESERVATION_CHANNELS` ([]; a single-element list raises).
+`AUTOPAY_HASH_KEY` (None; `{channel_idx: hash key}`, an Autopay ITN of a channel without a non-empty key is refused), `GLOBAL_STOCK_RESERVATION_CHANNELS` ([]; a single-element list raises).
 
 ## Soft integrations (optional extras)
 
@@ -31,3 +31,11 @@ pricing (`USE_PRICE_TUNER_IN_CHECKOUT`) and the voucher payment provider + valid
 (`USE_VALIDATE_VOUCHERS_SIGNAL`, `validate_vouchers_signal`, `compute_cart_voucher_total_signal`)
 are lazy imports / signal emissions with no-op fallbacks — the integrating packages ship outside
 this repository.
+
+`compute_cart_voucher_total_signal` hands the receiver `cart_id` and `cart_items`, a list of `(sku, amount)`, one per
+line. While the cart is edited the amount is the line total; when the order is created it is what the line costs
+after its discount (a gift line at its gift price). The voucher module lowers what it will debit to those lines and
+keeps the lower figure, so a discount code added and removed during checkout leaves a voucher's cover alone, and the
+order debits what the cart takes off. The cart caps each `per_sku` amount to the line it was handed, takes off at
+most its own total, and stores that as `voucher_amount_applied`, which the voucher's payment intent and PayPal's
+`discount` carry.

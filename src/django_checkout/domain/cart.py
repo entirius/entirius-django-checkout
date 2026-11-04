@@ -3,6 +3,7 @@
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 from django_pricemanager.output import validate_access_to_price_list
@@ -11,20 +12,28 @@ from django_utils.api.responses import ErrorInfo
 from django_checkout.domain.dto.cart import CartRequest, CheckoutData
 from django_checkout.domain.dto.discount import DiscountsRejectedError
 from django_checkout.domain.dto.item import SkuQuantityData
+from django_checkout.domain.payment_selection import covered_by_vouchers, is_voucher_method, settling_payment_method
 from django_checkout.domain.prices import calc_fee_of_price
 from django_checkout.domain.validators.address import validate_addresses
 from django_checkout.domain.validators.cart import check_min_order_price, validate_cart_data
 from django_checkout.domain.validators.delivery_date import validator_delivery_date
 from django_checkout.domain.validators.item import get_item_list_status
-from django_checkout.domain.validators.payment import validate_payment_method
+from django_checkout.domain.validators.order import voucher_on_split_order_error
+from django_checkout.domain.validators.payment import (
+    FREE_ORDER_AMOUNT_DUE_CODE,
+    free_order_with_amount_due,
+    validate_payment_method,
+)
 from django_checkout.domain.validators.shipping import get_shipping_method_option, validate_shipping_method
 from django_checkout.enums import ValidationStatus
 from django_checkout.settings import CUSTOMS_THRESHOLD_ENABLED
 from django_checkout.utils.api.utils import resolve_country, resolve_currency, resolve_language
+from django_checkout.worker.split_order.validator import check_that_order_can_be_split
 
 if TYPE_CHECKING:
     from django_accounts.models.customer import Customer
 
+    from django_checkout.models.cart import Cart
     from django_checkout.models.channel import Channel
 
 
@@ -40,6 +49,20 @@ def _sent_discount_codes(data: CartRequest, checkout_data: CheckoutData) -> list
     """The codes the customer entered, in the order sent: the request's, else the stored cart's."""
     discounts = getattr(data.cart, "discounts", None) or getattr(checkout_data.cart, "discounts", None) or []
     return [d.code for d in discounts if d.code and not getattr(d, "is_automatic", False)]
+
+
+def voucher_split_parts(cart: "Cart | SimpleNamespace | None", channel: "Channel", carries_voucher: bool) -> int:
+    """How many orders a cart that carries a voucher splits into; 0 when it does not split or carries none.
+
+    Each part of a split is created with one payment method, the gateway, so a voucher reaches none of them: the
+    parts add up to the full amount and the voucher keeps its balance. ``cart`` is the saved record or a view of
+    the cart being processed: ``check_that_order_can_be_split`` reads only ``as_data.cart.items`` and
+    ``as_data.split_order``.
+    """
+    if cart is None or not carries_voucher:
+        return 0
+    _items, parts = check_that_order_can_be_split(cart, channel)
+    return parts if parts and parts > 1 else 0
 
 
 def process_cart(
@@ -128,12 +151,10 @@ def process_cart(
         customer,
         cart_record=cart,
     )
-    # validate_payment_method always returns lists. Downstream code in this
-    # module currently operates on a single payment method (legacy). Unwrap
-    # to first item for backward compat — extend here when multi-method
-    # processing reaches discount/fee/order create paths below.
-    validated_payment = validated_payments[0] if validated_payments else None
-    payment_method = payment_methods[0] if payment_methods else None
+    # validate_payment_method returns lists, in the order the client sent them: entry [0] may be a voucher. Cash on
+    # delivery and the fee belong to the method that settles what the vouchers leave, as in Order.create; the cart
+    # is valid only with every entry valid, and product limits apply to every method.
+    settling_method = settling_payment_method(payment_methods)
     messages.extend(msgs)
 
     # Provider-specific cart attachment (e.g. voucher pay_code → CartVoucher rows).
@@ -155,7 +176,7 @@ def process_cart(
         validated_addresses,
         shipping_method,
         shipping_option,
-        payment_method,
+        payment_methods,
         checkout_data,
         customer=customer,
         split_order_data=split_order_data,
@@ -263,8 +284,8 @@ def process_cart(
                 validated_shipping.discount_amount = validated_shipping.unit_price
                 validated_shipping.unit_price = Decimal(0)
             elif (
-                validated_payment is not None
-                and validated_payment.is_cash_on_delivery
+                settling_method is not None
+                and settling_method.is_cash_on_delivery
                 and validated_shipping.cash_on_delivery_fee is not None
                 and validated_shipping.total_price > 0
             ):
@@ -321,11 +342,13 @@ def process_cart(
     fee_price = Decimal(0)
     fee_tax_rate = Decimal(0)
     fee_tax_price = Decimal(0)
+    voucher_paid = Decimal(str(validated_cart_data.voucher_amount_applied or 0))
 
     if split_order_data:
         fee_price = split_order_data.fee_price
-    elif payment_method:
-        fee_price = calc_fee_of_price(payment_method, total)
+    elif settling_method and not covered_by_vouchers(voucher_paid, total):
+        # With the vouchers covering everything the method settles nothing: it is dropped below, its fee with it.
+        fee_price = calc_fee_of_price(settling_method, total)
         fee_tax_rate = validated_shipping.tax_rate if validated_shipping else Decimal(0)
         fee_tax_price = round(fee_price - (fee_price / (1 + fee_tax_rate)), 2) if fee_tax_rate else Decimal(0)
 
@@ -334,6 +357,31 @@ def process_cart(
     total_to_min_order_price, msg, order_total_too_low = check_min_order_price(channel, validated_cart_data)
     if msg:
         messages.append(msg)
+
+    if data.split_order is not None and isinstance(data.split_order, bool):
+        split_order = data.split_order
+    elif checkout_data.split_order is not None and isinstance(checkout_data.split_order, bool):
+        split_order = checkout_data.split_order
+    else:
+        split_order = False
+
+    # A voucher on a cart that splits is refused here, while the customer can still change the cart. The voucher
+    # is an amount taken off the total, or a payment entry: by code in the request's entries (no provider there),
+    # by provider in the channel's methods (none resolve while the cart has no address). A cart save is judged on
+    # the cart it produces (the saved record still holds the items and split_order of the previous save); an
+    # order on the saved record, which is what the order then splits.
+    carries_voucher = not split_order_data and (
+        Decimal(str(validated_cart_data.voucher_amount_applied or 0)) > 0
+        or any(is_voucher_method(pm) for pm in [*(validated_payments or []), *(payment_methods or [])])
+    )
+    split_cart = (
+        SimpleNamespace(as_data=SimpleNamespace(cart=validated_cart_data, split_order=split_order))
+        if cart is not None and not is_order_creation
+        else cart
+    )
+    split_parts = voucher_split_parts(split_cart, channel, carries_voucher)
+    if split_parts:
+        messages.append(voucher_on_split_order_error(split_parts))
 
     # Voucher coverage check: if the only payment method is voucher AND voucher
     # balance did not cover the full cart total, the remaining amount is
@@ -356,7 +404,6 @@ def process_cart(
             if not PaymentProvider.is_voucher(getattr(pm, "provider", None), getattr(pm, "code", None))
         ]
         remaining_to_pay = Decimal(str(total or 0))
-        voucher_paid = Decimal(str(validated_cart_data.voucher_amount_applied or 0))
         if not non_voucher_pm and remaining_to_pay > Decimal("0"):
             voucher_coverage_insufficient = True
             cart_total_before_voucher = voucher_paid + remaining_to_pay
@@ -390,7 +437,7 @@ def process_cart(
                     extra=extra,
                 )
             )
-        elif non_voucher_pm and voucher_paid > Decimal("0") and remaining_to_pay <= Decimal("0"):
+        elif non_voucher_pm and covered_by_vouchers(voucher_paid, remaining_to_pay):
             # Voucher covers 100% — drop the now-redundant gateway method(s).
             drop_codes = {getattr(pm, "code", None) for pm in non_voucher_pm}
             payment_methods = [
@@ -399,6 +446,16 @@ def process_cart(
                 if PaymentProvider.is_voucher(getattr(pm, "provider", None), getattr(pm, "code", None))
             ]
             validated_payments = [vp for vp in (validated_payments or []) if vp.code not in drop_codes]
+
+    free_order_amount_due = free_order_with_amount_due(payment_methods, total)
+    if free_order_amount_due:
+        messages.append(
+            ErrorInfo(
+                code=FREE_ORDER_AMOUNT_DUE_CODE,
+                message=f"This payment method is only for orders with nothing to pay; {total} {currency} is due.",
+                affected_field="cart.payment_method",
+            )
+        )
 
     if validated_cart_data.tax_amount is not None:
         total_tax = (
@@ -423,21 +480,17 @@ def process_cart(
             validated_cart_data.validation_status == ValidationStatus.VALID
             and validated_addresses is not None
             and validated_shipping is not None
-            and validated_payment is not None
+            and validated_payments
+            and not split_parts
             and is_delivery_date_valid
             and not order_total_too_low
             and not voucher_coverage_insufficient
-            and get_item_list_status([validated_shipping, validated_payment]) == ValidationStatus.VALID
+            and not free_order_amount_due
+            and get_item_list_status([validated_shipping, *validated_payments]) == ValidationStatus.VALID
         )
         else ValidationStatus.INVALID
     )
 
-    if data.split_order is not None and isinstance(data.split_order, bool):
-        split_order = data.split_order
-    elif checkout_data.split_order is not None and isinstance(checkout_data.split_order, bool):
-        split_order = checkout_data.split_order
-    else:
-        split_order = False
     messages = [msg for msg in messages if msg]
     return (
         CheckoutData(

@@ -1,6 +1,6 @@
 [project]
 name = "entirius-django-checkout"
-version = "10.0.1"
+version = "10.1.0"
 description = "Checkout engine for Entirius: carts, orders, payment gateways, shipping, discounts and sale offers"
 keywords = ["django", "checkout", "cart", "orders", "payments", "ecommerce", "entirius"]
 classifiers = [
@@ -42,7 +42,7 @@ dependencies = [
     "tqdm",
     "pytz",
     "defusedxml>=0.7.1",
-    "entirius-django-utils>=2.0.0",
+    "entirius-django-utils>=2.1.0",
     "entirius-django-regional>=2.0.0",
     "entirius-django-pim>=3.1.0",
     "entirius-django-accounts>=5.0.0",

@@ -9,6 +9,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from django_checkout.domain.payment_selection import settling_payment_method
+from django_checkout.enums import ItemStatus
 from django_checkout.schemas.common import format_money, format_tax_rate
 from django_checkout.schemas.responses.address import AddressesResponse
 
@@ -246,6 +248,14 @@ class GratisInfoResponse(BaseModel):
     rules: list[dict] = Field(default_factory=list, description="Available gratis rules (always array)")
 
 
+def _gratis_rules(cart) -> list[dict]:
+    """The rules the cart holds. A legacy stored shape (bare codes, one rule as a dict) lists none."""
+    rules = getattr(cart, "available_gratis_rules", None)
+    if not isinstance(rules, list):
+        return []
+    return [rule for rule in rules if isinstance(rule, dict)]
+
+
 class CartErrorDetail(BaseModel):
     """A warning about one part of the cart. The write itself succeeded (HTTP 200/201)."""
 
@@ -274,8 +284,13 @@ class CartV2Response(BaseModel):
     currency: str | None = Field(None, description="Currency code", examples=["EUR"])
 
     # Cart totals
-    subtotal_gross: str = Field(description="Cart subtotal gross (before shipping)", examples=["399.98"])
-    subtotal_net: str | None = Field(None, description="Cart subtotal net", examples=["325.19"])
+    subtotal_gross: str = Field(
+        description="Valid items at catalogue price, gross: before special prices, discounts, shipping and the payment fee",
+        examples=["499.98"],
+    )
+    subtotal_net: str | None = Field(
+        None, description="Net of subtotal_gross: the items' catalogue net", examples=["406.49"]
+    )
     total_gross: str = Field(description="Cart total gross (incl shipping + fee)", examples=["419.97"])
     total_net: str | None = Field(None, description="Cart total net", examples=["341.44"])
     total_tax: str | None = Field(None, description="Total tax amount", examples=["78.53"])
@@ -358,10 +373,15 @@ class CartV2Response(BaseModel):
                     discounts.append(DiscountResponse.from_domain(d))
 
         # Compute net totals from gross
-        base_total = Decimal(str(checkout_data.base_total)) if checkout_data.base_total else Decimal("0")
+        # The subtotal is the items alone: `base_total` and `total_tax` also hold shipping and the payment fee.
+        # It is the valid items at catalogue price, and its net is their catalogue net: `cart.tax_amount` is the tax
+        # after special prices and discounts, so the gross minus it is neither net.
+        items_total = cart.base_total_price if cart and cart.base_total_price is not None else checkout_data.base_total
+        subtotal_gross = Decimal(str(items_total)) if items_total else Decimal("0")
+        valid_nets = [Decimal(i.total_net) for i in items if i.status == ItemStatus.VALID.value and i.total_net]
         total = Decimal(str(checkout_data.total)) if checkout_data.total else Decimal("0")
         total_tax = Decimal(str(checkout_data.total_tax)) if checkout_data.total_tax else Decimal("0")
-        subtotal_net = base_total - total_tax if total_tax else None
+        subtotal_net = sum(valid_nets, Decimal("0")) if valid_nets else None
         total_net = total - total_tax if total_tax else None
 
         # Discount totals
@@ -393,7 +413,7 @@ class CartV2Response(BaseModel):
                 is_available=getattr(cart, "is_gratis_available", False) or False,
                 nearest_tier_price=format_money(getattr(cart, "amount_required_for_nearest_gratis_rule", None)),
                 amount_missing=format_money(getattr(cart, "amount_missing_for_nearest_gratis_rule", None)),
-                rules=getattr(cart, "gratis_rules", None) or [],
+                rules=_gratis_rules(cart),
             )
 
         return cls(
@@ -405,7 +425,7 @@ class CartV2Response(BaseModel):
                 else str(checkout_data.validation_status)
             ),
             currency=checkout_data.currency_code,
-            subtotal_gross=format_money(base_total),
+            subtotal_gross=format_money(subtotal_gross),
             subtotal_net=format_money(subtotal_net),
             total_gross=format_money(total),
             total_net=format_money(total_net),
@@ -414,8 +434,9 @@ class CartV2Response(BaseModel):
             items=items,
             addresses=AddressesResponse.from_domain(checkout_data.addresses),
             shipping_method=ShippingInCartResponse.from_domain(checkout_data.shipping_method),
+            # The method that settles the rest: it carries the fee and cash on delivery; entry [0] may be a voucher.
             payment_method=PaymentInCartResponse.from_domain(
-                checkout_data.primary_payment_method, fee_price=fee_price, fee_tax_rate=fee_tax_rate
+                settling_payment_method(checkout_data.payment_method), fee_price=fee_price, fee_tax_rate=fee_tax_rate
             ),
             discounts=discounts,
             total_discount_gross=format_money(discount_gross),

@@ -23,20 +23,40 @@ if TYPE_CHECKING:
 
 
 def get_product_available(
-    sku_list: list[str], shipping_method: "ShippingMethod", payment_method, channel: "Channel", customer
-) -> tuple[list[str], bool]:
-    products_available, allowed_guest_checkout = LimitedProducts.objects.filter_products_by_limitation(
-        sku_list, shipping_method, payment_method, channel, True if customer else False
-    )
+    sku_list: list[str], shipping_method: "ShippingMethod", payment_methods: list, channel: "Channel", customer
+) -> tuple[set[str], bool]:
+    """The SKUs no limit takes out for the shipping method and each of the cart's payment methods, and whether a guest
+    may buy them. A voucher pays next to another method, so the limits of every method apply, not only entry [0]'s.
+    """
+    products_available = None
+    allowed_guest_checkout = True
+    for payment_method in {method.pk: method for method in payment_methods or []}.values() or [None]:
+        products, allowed = LimitedProducts.objects.filter_products_by_limitation(
+            sku_list, shipping_method, payment_method, channel, True if customer else False
+        )
+        products_available = set(products) if products_available is None else products_available & set(products)
+        allowed_guest_checkout = allowed_guest_checkout and allowed
     return products_available, allowed_guest_checkout
 
 
+def _quantities_by_sku(items: list[SkuQuantityData]) -> dict:
+    """Pieces per SKU over every line: a gift is a line of its own next to a bought line of the same SKU."""
+    quantities = {}
+    for item in items:
+        quantities[item.sku] = quantities.get(item.sku, 0) + item.quantity
+    return quantities
+
+
 def check_items_weight(items: list[SkuQuantityData], channel: "Channel"):
+    """Weight of every piece together, whether a product lacks a weight, and the weight of one piece per SKU.
+
+    A SKU can sit on two lines (bought and gift), so a line weighs its own quantity times the unit weight.
+    """
     sku_list = [elem.sku for elem in items]
     data = Product.objects.filter(shop__idx=channel.idx, real_product__sku__in=sku_list).values(
         "real_product__sku", "real_product__weight"
     )
-    quantities = {item.sku: item.quantity for item in items}
+    quantities = _quantities_by_sku(items)
     result = [
         {
             "real_product__sku": item["real_product__sku"],
@@ -47,18 +67,17 @@ def check_items_weight(items: list[SkuQuantityData], channel: "Channel"):
     ]
 
     item_sum_weight = 0
-    items_weight = {}
+    unit_weights = {}
     items_dont_have_weight = False
     for item in result:
         if not item["real_product__weight"]:
             items_dont_have_weight = True
-            items_weight[item["real_product__sku"]] = None
+            unit_weights[item["real_product__sku"]] = None
         else:
-            line_weight = item["quantity"] * item["real_product__weight"]
-            item_sum_weight += line_weight
-            items_weight[item["real_product__sku"]] = line_weight
+            item_sum_weight += item["quantity"] * item["real_product__weight"]
+            unit_weights[item["real_product__sku"]] = item["real_product__weight"]
 
-    return item_sum_weight, items_dont_have_weight, items_weight
+    return item_sum_weight, items_dont_have_weight, unit_weights
 
 
 def check_cart_is_too_heavy(item_sum_weight: list[SkuQuantityData], shipping_method: "ShippingMethod"):
@@ -78,14 +97,14 @@ def check_items_volume(items: list[SkuQuantityData], channel: "Channel"):
     if get_volumes_by_sku is None:
         return 0, False, {}
 
-    sku_list = [elem.sku for elem in items]
+    sku_list = list(dict.fromkeys(elem.sku for elem in items))
     try:
         volumes_by_sku = get_volumes_by_sku(channel.idx, sku_list)
     except Exception:
         logger.warning("Failed to fetch product volumes from PIM, skipping volume check")
         return 0, False, {}
 
-    quantities = {item.sku: item.quantity for item in items}
+    quantities = _quantities_by_sku(items)
 
     item_sum_volume = 0
     items_volume = {}

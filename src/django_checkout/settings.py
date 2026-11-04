@@ -74,8 +74,7 @@ if len(GLOBAL_STOCK_RESERVATION_CHANNELS) == 1:
 
 # Autopay
 
-# example: AUTOPAY_HASH_KEY = {"uk": "4e4690a86a119a737601d60a739e80fc9b79ccd8", "global-america": "0e4a6b71608f6a3f1e472a2b91d1ceeb8b0338e2", "global-rest": "4799537541edd9fd5ea033bfa666aba818846573"}
-
+# {channel_idx: hash key of that channel's Autopay service}; an ITN of a channel without a non-empty key is refused.
 AUTOPAY_HASH_KEY = getattr(settings, "AUTOPAY_HASH_KEY", None)
 
 

@@ -92,6 +92,22 @@ class BasePaymentProvider:
         """
         return None
 
+    def own_payment_data(self, order_dto):
+        """This method's entry of the order's payment methods.
+
+        Entry [0] is the voucher's when a voucher pays next to this method: no return URL, no card, and a pay_code
+        that holds voucher codes. Matched by code; the first entry when none matches.
+        """
+        entries = order_dto.payment_method or []
+        own = (entry for entry in entries if getattr(entry, "code", None) == self.payment_method.code)
+        return next(own, order_dto.primary_payment_method)
+
+    def resolve_own_continue_url(self, order: "Order", order_dto) -> str | None:
+        """The return URL of this method's entry, as ``resolve_continue_url`` hands it to the gateway."""
+        entry = self.own_payment_data(order_dto)
+        raw_url = entry.add_order_id_to_continue_url(order.pretty_id) if entry is not None else None
+        return self.resolve_continue_url(raw_url, order)
+
     def resolve_continue_url(self, raw_url: str | None, order: "Order") -> str | None:
         """Return the final URL handed to the payment gateway.
 

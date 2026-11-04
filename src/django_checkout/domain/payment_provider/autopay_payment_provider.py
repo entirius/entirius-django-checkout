@@ -112,7 +112,7 @@ class AutopayPaymentProvider(BasePaymentProvider, ProcessLoggerMixin):
             payment.payment_status = PaymentIntentStatus.ERROR
         else:
             payment.payment_status = PaymentIntentStatus.PENDING
-        payment.provider_request = self.provider_request
+        payment.provider_request = self.provider_request.to_dict()  # a DTO: JSONField stores dicts only
         payment.provider_notify = self.provider_notify
         payment.save()
 

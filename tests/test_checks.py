@@ -9,6 +9,7 @@ from django.core.checks import Tags, run_checks
 from django.core.checks import Warning as CheckWarning
 from django.db import ProgrammingError
 
+from django_checkout.checks import payu_methods_have_second_key
 from django_checkout.enums import PaymentProvider
 from django_checkout.models import PaymentMethod
 from django_checkout.models.payment_method import PaymentMethodQuerySet
@@ -78,4 +79,47 @@ def test_a_database_without_the_tables_reports_nothing(monkeypatch):
 
     monkeypatch.setattr(PaymentMethodQuerySet, "__iter__", no_table)
 
-    assert _payu_warnings() == []
+    # This check alone: run_checks() also runs other apps' database checks (django_access reads its users), and the
+    # test has no database to give them.
+    assert payu_methods_have_second_key(None, databases=["default"]) == []
+
+
+PAYPAL_CHECK_ID = "django_checkout.W002"
+
+
+def _paypal_warnings() -> list:
+    messages = run_checks(tags=["entirius_config"], databases=("default",))
+    return [message for message in messages if message.id == PAYPAL_CHECK_ID]
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("additional_data", [None, {}, {"client_id": "1"}, {"webhook_id": ""}])
+def test_paypal_method_without_webhook_id_is_reported(channel, additional_data):
+    _method(channel, "paypal", PaymentProvider.PAYPAL, additional_data)
+
+    (warning,) = _paypal_warnings()
+
+    assert "webhook_id" in warning.msg
+    assert "[test-channel] paypal" in warning.hint
+
+
+@pytest.mark.django_db
+def test_configured_and_non_paypal_methods_are_not_reported_as_paypal(channel):
+    _method(channel, "paypal", PaymentProvider.PAYPAL, {"client_id": "1", "webhook_id": "SYNTHETIC-WEBHOOK-ID"})
+    _method(channel, "payu", PaymentProvider.PAYU, {})
+
+    assert _paypal_warnings() == []
+
+
+@pytest.mark.django_db
+def test_the_paypal_check_reaches_configuration_health(channel):
+    """django-munin collects ``entirius_config`` with ``databases=["default"]``; ``database`` runs never see it."""
+    _method(channel, "paypal", PaymentProvider.PAYPAL, {})
+
+    config = run_checks(tags=["entirius_config"], databases=["default"])
+    database = run_checks(tags=[Tags.database], databases=["default"])
+    (warning,) = [m for m in config if m.id == PAYPAL_CHECK_ID]
+
+    assert not any(m.id == PAYPAL_CHECK_ID for m in database)
+    assert warning.obj["severity"] == "high"
+    assert warning.obj["state"] == "unconfigured"

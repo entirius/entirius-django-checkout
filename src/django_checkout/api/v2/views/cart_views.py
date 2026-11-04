@@ -23,7 +23,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from django_checkout.api.v2.exceptions import pydantic_error_response
 from django_checkout.api.v2.mixins import CheckoutChannelMixin
 from django_checkout.api.v2.openapi import CART_PARAM, CHANNEL_PARAM
-from django_checkout.api.v2.permissions import ChannelAPIKeyPermission
+from django_checkout.api.v2.permissions import GUEST_PERMISSIONS, ChannelAPIKeyPermission
 from django_checkout.models import Cart
 from django_checkout.schemas.requests.cart import (
     AddressesPatchRequest,
@@ -49,7 +49,7 @@ logger = logging.getLogger("checkout.v2")
 @extend_schema(parameters=[CHANNEL_PARAM])
 class CartCreateView(CheckoutChannelMixin, APIView):
     authentication_classes = [JWTAuthentication]
-    permission_classes = [ChannelAPIKeyPermission]
+    permission_classes = GUEST_PERMISSIONS
 
     @extend_schema(
         summary="Create cart",
@@ -83,7 +83,7 @@ class CartCreateView(CheckoutChannelMixin, APIView):
 @extend_schema(parameters=[CHANNEL_PARAM, CART_PARAM])
 class CartDetailView(CheckoutChannelMixin, APIView):
     authentication_classes = [JWTAuthentication]
-    permission_classes = [ChannelAPIKeyPermission]
+    permission_classes = GUEST_PERMISSIONS
 
     @extend_schema(
         summary="Retrieve cart",
@@ -133,7 +133,7 @@ class CartLatestView(CheckoutChannelMixin, APIView):
 @extend_schema(parameters=[CHANNEL_PARAM, CART_PARAM])
 class CartItemsView(CheckoutChannelMixin, APIView):
     authentication_classes = [JWTAuthentication]
-    permission_classes = [ChannelAPIKeyPermission]
+    permission_classes = GUEST_PERMISSIONS
 
     @extend_schema(
         summary="Update cart items",
@@ -168,7 +168,7 @@ class CartItemsView(CheckoutChannelMixin, APIView):
 @extend_schema(parameters=[CHANNEL_PARAM, CART_PARAM])
 class CartAddressesView(CheckoutChannelMixin, APIView):
     authentication_classes = [JWTAuthentication]
-    permission_classes = [ChannelAPIKeyPermission]
+    permission_classes = GUEST_PERMISSIONS
 
     @extend_schema(
         summary="Set addresses",
@@ -204,7 +204,7 @@ class CartAddressesView(CheckoutChannelMixin, APIView):
 @extend_schema(parameters=[CHANNEL_PARAM, CART_PARAM])
 class CartDiscountsView(CheckoutChannelMixin, APIView):
     authentication_classes = [JWTAuthentication]
-    permission_classes = [ChannelAPIKeyPermission]
+    permission_classes = GUEST_PERMISSIONS
 
     @extend_schema(
         summary="Apply discount codes",
@@ -240,7 +240,7 @@ class CartDiscountsView(CheckoutChannelMixin, APIView):
 @extend_schema(parameters=[CHANNEL_PARAM, CART_PARAM])
 class CartShippingMethodsView(CheckoutChannelMixin, APIView):
     authentication_classes = [JWTAuthentication]
-    permission_classes = [ChannelAPIKeyPermission]
+    permission_classes = GUEST_PERMISSIONS
 
     @extend_schema(
         summary="List available shipping methods",
@@ -255,7 +255,7 @@ class CartShippingMethodsView(CheckoutChannelMixin, APIView):
 @extend_schema(parameters=[CHANNEL_PARAM, CART_PARAM])
 class CartShippingView(CheckoutChannelMixin, APIView):
     authentication_classes = [JWTAuthentication]
-    permission_classes = [ChannelAPIKeyPermission]
+    permission_classes = GUEST_PERMISSIONS
 
     @extend_schema(
         summary="Select shipping method",
@@ -291,7 +291,7 @@ class CartShippingView(CheckoutChannelMixin, APIView):
 @extend_schema(parameters=[CHANNEL_PARAM, CART_PARAM])
 class CartPaymentMethodsView(CheckoutChannelMixin, APIView):
     authentication_classes = [JWTAuthentication]
-    permission_classes = [ChannelAPIKeyPermission]
+    permission_classes = GUEST_PERMISSIONS
 
     @extend_schema(
         summary="List available payment methods",
@@ -335,12 +335,16 @@ class _CartPaymentThrottle(SimpleRateThrottle):
 @extend_schema(parameters=[CHANNEL_PARAM, CART_PARAM])
 class CartPaymentView(CheckoutChannelMixin, APIView):
     authentication_classes = [JWTAuthentication]
-    permission_classes = [ChannelAPIKeyPermission]
+    permission_classes = GUEST_PERMISSIONS
     throttle_classes = [_CartPaymentThrottle]
 
     @extend_schema(
         summary="Select payment method",
-        description="Select a payment method. Optionally include bank ID, card token.",
+        description=(
+            "Select a payment method. Optionally include bank ID, card token and `continue_url`, where the gateway "
+            "returns the customer after paying (PayU, PayU card and BLIK, Stripe hosted checkout); 400 for a target "
+            "the payment step would refuse."
+        ),
         tags=["Checkout Cart"],
         request=PaymentPatchRequest,
         responses={200: CartV2Response},
@@ -364,6 +368,7 @@ class CartPaymentView(CheckoutChannelMixin, APIView):
                 card=body.card,
                 save_card=body.save_card,
                 pay_code=body.pay_code,
+                continue_url=body.continue_url,
                 customer=customer,
                 geo_country=geo_country,
             )
@@ -411,7 +416,7 @@ class CartMergeView(CheckoutChannelMixin, APIView):
 @extend_schema(parameters=[CHANNEL_PARAM, CART_PARAM])
 class CartGratisView(CheckoutChannelMixin, APIView):
     authentication_classes = [JWTAuthentication]
-    permission_classes = [ChannelAPIKeyPermission]
+    permission_classes = GUEST_PERMISSIONS
 
     @extend_schema(
         summary="List gratis rules",
@@ -426,7 +431,7 @@ class CartGratisView(CheckoutChannelMixin, APIView):
 @extend_schema(parameters=[CHANNEL_PARAM])
 class CountriesView(CheckoutChannelMixin, APIView):
     authentication_classes = [JWTAuthentication]
-    permission_classes = [ChannelAPIKeyPermission]
+    permission_classes = GUEST_PERMISSIONS
 
     @extend_schema(
         summary="List countries",

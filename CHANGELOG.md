@@ -1,5 +1,286 @@
 # Changelog
 
+## 10.1.0 — 2026-11-04
+
+### Security
+
+- The payment bridge refuses a web target with a backslash in its host part (`https://evil.example\@shop.example/`):
+  the host check read `shop.example` there, while a browser reads the backslash as `/` and opens `evil.example`.
+  Only deployments that send web return URLs through the bridge (`https` left out of
+  `PAYMENT_REDIRECT_DIRECT_SCHEMES`) were open to it.
+
+- A `free_order` payment method settles only a cart with nothing left to pay (after vouchers and fees). With an
+  amount due the cart is invalid with `free_order_amount_due` (v2 `FREE_ORDER_AMOUNT_DUE`, client-visible
+  addition), the payment method list no longer offers `free_order`, and `Order.create` refuses on its own. Customer
+  groups and product links still narrow who sees the method; they no longer make a paid cart free.
+- PayPal: `notify/paypal/` changes a payment only when PayPal confirms the notification's signature
+  (verify-webhook-signature, against the `webhook_id` in the payment method's `additional_data`) and the payment
+  belongs to a PayPal payment method. Anything else is answered 403 and writes nothing; PayPal redelivers it. The
+  verification calls PayPal with a 10 s timeout. `django_checkout.W002` (`manage.py check --database default`)
+  lists PayPal methods without `webhook_id`.
+- PayPal: the webhook, the buyer's return and the cancel return only move a payment forward. A COMPLETE payment
+  stays final, a CANCELLED one gives way only to a completed payment; an order is confirmed only while it waits for
+  payment (or after a cancellation: logged for manual review, its stock reservation is gone) and cancelled only while
+  it waits for payment. Statuses are applied under a row lock on the payment and its order. The cancel return
+  records a cancellation only: for an approved or completed PayPal order it changes nothing and captures nothing.
+  BI finish tags keep their wording; new outcomes add their own (`..., Order status <status> kept`,
+  `PaymentIntent is already <status>, <status> ignored`).
+- Przelewy24: a verified notification completes the payment through the same rules: a resent notification of a
+  paid transaction no longer puts an order in progress, completed or returned back to CONFIRMED. The BI finish tag
+  of a confirmed order keeps its wording.
+- Paynow: notifications go through the same rules: a late or repeated status no longer pulls a COMPLETE payment
+  back, re-confirms an order that moved on, or cancels an order confirmed by hand. BI finish tags keep their wording.
+- Paynow: `notify/paynow/` changes only a Paynow payment (another gateway's payment is answered 404, like any other
+  refused notification), and the `Signature` header is compared in constant time.
+- Przelewy24: `notify/przelewy24/` changes only a Przelewy24 payment: a notification naming another gateway's
+  payment is answered 403 before Przelewy24 is asked, and a body needs both `orderId` and `sessionId`. The verify
+  call uses the payment's own method, not the first method listed on the order (with a voucher listed first it
+  failed).
+- Przelewy24: a notification is verified by its `sign` (SHA-384 over the documented fields and the method's CRC key)
+  before Przelewy24's verify API is asked; a missing CRC key or sign is answered 403. The CRC key comes from the
+  method's `crc_key`, else the `PRZELEWY24_CRC_KEY` setting, for the sign and the verify call alike.
+- Autopay: a repeated or late `SUCCESS` ITN confirms an order only while it waits for payment, through the same
+  rules; an order in progress, completed or returned keeps its status. A COMPLETE payment was already never
+  downgraded. BI finish tags keep their wording.
+- Autopay: `notify/autopay/` verifies an ITN only with a non-empty `AUTOPAY_HASH_KEY` entry of the channel in the
+  URL; without one the ITN is answered 400 `NOTCONFIRMED` (it was 500 for a channel missing from the setting). The
+  hash is compared in constant time.
+- Autopay: a verified ITN changes only an Autopay payment of the channel whose hash key verified it.
+- Stripe: checkout session events go through the same rules: a late or repeated event no longer pulls a COMPLETE
+  payment back, re-confirms an order that moved on, or cancels an order confirmed by hand and releases its stock.
+  An unhandled `payment_status` on an open payment still sets ERROR and answers 400. BI finish tags keep their
+  wording.
+- PayU: signed notifications (`payu`, `payu_card`, `payu_blik`) go through the same rules: a late or repeated status
+  no longer pulls a COMPLETE payment back, re-confirms an order that moved on, or cancels an order confirmed by hand
+  and releases its stock. BI finish tags keep their wording.
+- Stripe: `notify/stripe/` verifies an event only with a non-empty `endpoint_secret` of the channel's Stripe
+  payment method; without one the event is answered 400. The view no longer sets the process-wide
+  `stripe.api_key`, and a request without a `Stripe-Signature` header is answered 400 instead of 500.
+- Stripe: a verified event changes only a Stripe payment of the channel whose endpoint secret verified it.
+
+### Upgrade notes
+
+- **Przelewy24:** notifications are refused (403) for a Przelewy24 method without a CRC key: set `crc_key` in its
+  `additional_data` or the `PRZELEWY24_CRC_KEY` setting. Registering transactions already needed it for their sign.
+- **PayPal:** every PayPal payment method needs `webhook_id` (PayPal developer dashboard: the REST app, Webhooks,
+  Webhook ID of the webhook pointing at `notify/paypal/`) in its `additional_data`. Without it webhook notifications
+  are refused (PayPal retries them for about 3 days) and an order is confirmed only when the buyer returns to the
+  shop.
+- **Customer erasure:** `DELETE customer/delete` answers 409 `OPEN_ORDERS` (and the Python API raises
+  `django_checkout.output.admin.ErasureBlocked`) while the customer has an order that is not `complete`, `returned`
+  or `canceled`. A caller that erases on request has to cancel or finish those orders first and repeat the request;
+  nothing cancels an abandoned unpaid order by itself.
+  Erase in checkout before deleting the account in django-accounts: afterwards checkout finds orders only by the
+  e-mails they hold.
+- **Gateway payloads:** after the deploy run `manage.py scrub-gateway-payloads` (dry run, counts only), then
+  `manage.py scrub-gateway-payloads --apply`: payments stored before keep their whole payloads, buyer included,
+  until then. Idempotent; `--batch-size` sets the rows per batch (500).
+
+### Fixed
+
+- Customer erasure (GDPR, `DELETE customer/delete` and `output.admin.admin_customer_delete`) anonymises every
+  personal field checkout keeps, not only the names and e-mails inside `order_body`: the order's `billing_email` /
+  `shipping_email` columns and the e-mails of its `UsedCoupon` rows; street, city, postcode, phone, company and tax id
+  of both addresses, the customer's comment and IP (in the order and in its cart); and the gateway payloads of its
+  payments (`PaymentIntent.provider_request` / `provider_notify`: buyer, payer, shipping address), which keep only
+  ids, amounts, currencies, statuses and timestamps. The intent's columns (amount, currency, external id, status)
+  stay. The payment redirect bridge's target (`PaymentRedirect.target_url`, a copy of the `continue_url` the body
+  already redacted) becomes `***REDACTED***`, so a link still open answers 404. The payment's own link is redacted
+  too (`PaymentIntent.redirect_url`: the gateway's payment page or, for BLIK, the same `continue_url` copy).
+  The request also finds orders by those e-mail columns and by the e-mail a used code stored (the account e-mail of
+  a deleted account), so repeating it completes an order an earlier erasure left half done. New command
+  `complete-erasures` finishes the orders and carts erased before this release (dry run unless `--apply`).
+- Customer erasure no longer anonymises another customer's order or cart. `order_body` and `cart_body` were
+  searched for the e-mail as a substring, so erasing `anna@example.org` anonymised every order and cart of
+  `joanna@example.org`, and erasing a gift card's recipient anonymised the buyer's whole order. The customer's own
+  orders are found by the account, the e-mail columns, the billing and shipping address e-mails and the used codes
+  (the whole address, case-insensitive); carts by the account and the address e-mails. In another customer's order
+  or cart the erased e-mail is replaced wherever a string holds it (gift card recipient, comment) and nothing else
+  changes, under a row lock; such an order never refuses the erasure. The account e-mail matches case aside.
+- Autopay: an order paid with Autopay is created again. `process_payment` stored the request DTO itself in
+  `provider_request`, which a JSON field cannot hold, so saving the payment raised `TypeError` and the order rolled
+  back. It stores the DTO's dict (through the allowlist).
+- Log lines and BI events no longer carry a customer's personal data. The admin order preview (v2
+  `GET admin/{channel}/orders/{uid}/`) logged the billing e-mail and now logs the order id; the PayU, PayPal and
+  Stripe notification views logged and sent to BI the whole notification (buyer, payer, `customer_details`) and now
+  keep only what `scrub_gateway_payload` keeps (ids, amounts, statuses), a body that is no JSON not at all; the
+  Autopay ITN view no longer logs its XML (`customerData` is the buyer); a failed v1 order logs the customer's pk, not
+  `str(customer)` (the username, which is the e-mail); Paynow's invalid-phone line no longer names the number.
+- The cart charges the payment fee and the cash on delivery surcharge of the method that pays what the vouchers
+  leave, not of entry `[0]` of `payment_method` (client-visible: totals change). `[voucher, cod]` dropped both: with
+  a 23.00 voucher on 123.00, courier 10.00 + 5.00 cash on delivery and a 2.00 fee the cart asked 110.00 instead of
+  117.00, and `Order.create` already confirmed it as cash on delivery. A gateway's fee is charged in either order;
+  when the vouchers cover the whole cart no method settles anything, the cart drops the gateway and charges no fee
+  (`[payu, voucher]` asked 2.00 at PayU for the fee alone). The v2 cart's `payment_method` is that method too, with
+  its fee and `is_cash_on_delivery`; a cart with one method shows the same as before.
+- The payment bridge (`redirect/<token>/`) hands the mobile app the status of the payment the client was sent to
+  make (client-visible: `payment_status` in the app's return URL). It read the order's first payment, which for
+  `[voucher, gateway]` is the voucher, debited at order time: the app saw `complete` while the gateway was still
+  `pending`. When the vouchers cover the order it is the voucher's status, as before.
+- A cart is `valid` only with every `payment_method` entry valid, and product limits set for a shipping and payment
+  method pair apply to each of the cart's methods (client-visible). Both read entry `[0]` only: `[payu, voucher]`
+  with a voucher code refused as malformed stayed valid (`[voucher, payu]` did not), and a product limited for
+  courier with cash on delivery went through as `[voucher, cod]`.
+- v2 `PATCH carts/{id}/payment/` takes an optional `continue_url` (additive), where the gateway sends the customer
+  back after paying, `<order_id>` replaced by the order number, at most 2048 characters. The service wrote no return
+  URL for a v2 cart: PayU (`payu`, `payu_card`, `payu_blik`) got no `continueUrl` and Stripe no `success_url`, so
+  Stripe refused to open the session. It is stored with the payment method as v1 stores it and never returned. A
+  target the payment step refuses is answered 400 (`field: "continue_url"`) instead of failing the payment after
+  the order: a scheme in `PAYMENT_REDIRECT_DIRECT_SCHEMES`, or a bridge target
+  (`PAYMENT_REDIRECT_BRIDGE_TARGET_SCHEMES`, `PAYMENT_REDIRECT_ALLOWED_HOSTS` for http/https).
+- A voucher larger than what the cart has left is debited only by what it takes off (client-visible:
+  `voucher_amount_applied` and the voucher's payment intent drop, the gift card keeps the rest). With a 200.00 gift
+  card on a 123.00 item and a 10 % code the cart took 110.70 off and the card lost 123.00: the voucher module was
+  handed each line at its price before discounts and debited that. When the order is created,
+  `compute_cart_voucher_total_signal` now gets what each line costs after its discount; while the cart is edited it
+  still gets the line totals, so a code added and removed leaves the voucher's cover alone.
+  `voucher_amount_applied` is never more than the total it reduced (PayPal's `discount` and the voucher's payment
+  intent read it; a cart below `min_order_price` no longer counts a voucher's surplus towards it).
+- The cart reports `voucher_not_supported_on_split_order` for the cart it answers with. The rule asked whether the
+  saved cart splits, with the items and `split_order` of the previous save: a PATCH adding the item that splits the
+  cart came back without the error and the PATCH removing it still carried it. The order gate (v1 403, v2 409) is
+  unchanged: it reads the saved cart, which is what the order splits.
+
+- Stripe: a line of several units with a cart discount is charged its discounted total. Its `unit_amount` was the
+  unit price less the discount of the whole line, and Stripe multiplies `unit_amount` by the quantity: 3 x 54.99 at
+  15 % off charged 90.72 instead of 140.22, and a large discount sent a negative amount Stripe refused. Lines carry
+  the sold unit price; what the cart takes off its items (cart discounts, a gift's price, a voucher taken off the
+  total) goes into one `amount_off` coupon per session, single use, in the order's currency, on the payment method's
+  account. A gift was charged its product's full price, and a voucher on top of the card. The coupon is named by
+  `localized_names.discount` in the method's `additional_data` (default `Discount`).
+- A voucher on a cart that splits into several orders is refused (client-visible). The cart reports
+  `voucher_not_supported_on_split_order` (v2 `_errors` code `VOUCHER_NOT_SUPPORTED_ON_SPLIT_ORDER`, v1 `extra`
+  `split_parts`) and stays `invalid`; `POST orders/` refuses it with v2 409 and that `error`, v1 403 and that
+  `status`. Each part of a split is created with the gateway alone, so the voucher reached none of the parts: they
+  added up to the full amount and the voucher kept its balance. A split without a voucher and a voucher without a
+  split are not affected.
+- An order paid with a voucher and another method debits the voucher before any gateway is asked: with the gateway
+  listed first its session existed before the debit, and a debit that failed rolled the order back while the session
+  stayed payable. Cash on delivery and free order come from the method that pays the rest, not from entry `[0]`: a
+  voucher with cash on delivery left the order `unpaid` instead of `confirmed`. The free-order check of
+  `Order.create` reads that method too.
+- A gateway paid next to a voucher (`payment_method` `[voucher, gateway]`) reads its own entry of the list, not
+  entry `[0]`, which is the voucher's. PayU (`payu`, `payu_card`, `payu_blik`) and Stripe got no return URL
+  (`continueUrl`, `success_url`; Stripe refuses a session without one) and PayU card no card token. BLIK sent the
+  customer's BLIK code on no order, with or without a voucher: it looked for `pay_code` on the list itself. PayPal's
+  breakdown carries the voucher in `discount`: the amount is net of the voucher and the parts were not, so PayPal
+  refused the order.
+- `cheapest_gratis` and `most_expensive_gratis` give their discount (client-visible: cart totals drop). The rule's
+  units of the chosen item (`extra_value`, at most what the cart holds) come at the gift price, as a picked gift does
+  (`GRATIS_PERCENT_DISCOUNT` down to `GRATIS_PRICE`, or `GRATIS_PRICE` under `GRATIS_MECHANISM = 2`), never above
+  the item's own price; a channel that discounts net prices gets the same gift price. The discount was computed and
+  then overwritten with the item's earlier discount, so the code came out valid at 0. The item is picked by price
+  among the bought lines: a gift line, always the cheapest at the gift price, is never picked, and a line with more
+  units no longer wins over a cheaper (or dearer) one; quantity only breaks a price tie.
+- Merging a guest cart into the customer's cart no longer fails, v1 (`carts/{id}/merge/`) and v2
+  (`POST carts/{id}/merge/`). `CartRequest.factory()` left out five fields the request requires
+  (`custom_order_id`, `requested_delivery_date`, `split_order`, `affiliate_code`, `customer_ip`), so every merge
+  raised `TypeError`: v2 answered 500, v1 500 `Internal Exception`. A gift line is no longer summed into the merged
+  quantities as a bought unit: the customer's gift comes back from its code, and a guest's gift goes with the guest's
+  codes, which a merge does not carry over. A guest cart that already became an order (or is no longer open) answers
+  404 and stays as it is; deleting it after the merge raised `ProtectedError`, another 500. v1 merges through the
+  same service as v2, so it keeps each line's `extra` and `voucher_gift` as v2 does.
+- The PayPal `webhook_id` warning (`django_checkout.W002`) reaches the CMS: it carries the `entirius_config` tag
+  django-munin collects, and names the methods in its hint.
+- Stripe: `notify/stripe/` stores the checkout session as plain JSON. With stripe 12 or later (the lock pins 15) a
+  `StripeObject` is no dict, so saving it in `provider_notify` raised and every verified session event answered
+  500 without changing the payment.
+- PayPal: the buyer's return (`return/paypal/`) saves the status PayPal's capture API reports on the payment and
+  the order. It answered 500 after the capture and saved nothing, so only the webhook confirmed PayPal orders.
+- A gift of a SKU the customer also buys is a line of its own: it no longer replaces the bought line (a bought mug
+  and the same mug picked as the gift came out as one mug at the gift price, `changed_price`). The gift is refused
+  when the bought units and the gift together exceed the saleable stock, and a gift above the stock is no longer
+  accepted on its own either. Cart weight and volume count the pieces of every line; each line's `total_weight` is
+  its own.
+- `import-discount-rules` (and the CSV import in the Django admin) no longer hangs. The mode-of-action loop of a
+  row never ended once the row ran out of modes (`is_inclusion_or_exclusion_<n>` empty or missing), so the import
+  never reached the row's codes or the next row; the admin import held the request until it timed out.
+- An order is refused when a valid item is priced 0 (`UNPROCESSABLE_ENTITY sku: <sku>`, v1 403). `OrderValidation`
+  compared `str(total_price) == 0`, a string against an int, so the check never fired and such an item went into
+  the order. A gift still passes at 0 (`GRATIS_MECHANISM = 2`, `GRATIS_PRICE = 0`), and an item that is not valid
+  keeps its own reason (`OUT_OF_STOCK`), not the 0 that `invalid_factory` gives it.
+- A v1 order with a code that sits on more than one rule (one code on an EUR and a PLN rule, as `GRATIS_STEP` in
+  the test package, or the same code in another channel) no longer fails after the order is saved. `use_discounts`
+  looked the code up by its text alone and raised `MultipleObjectsReturned`, so the customer got 403
+  `INVALID_REQUEST` for an order that existed. The usage now counts on the code row the cart applied: a rule of the
+  order's channel and currency (or of none), of the same kind (typed or automatic) and modifier, lowest pk on a tie.
+- v2 API (client-visible): `POST orders/` counts the discount codes it takes, as v1 does. It never did, so
+  `max_used` and `max_uses_per_user` limited nothing for v2 orders and a one-use code worked forever. v1 and v2 now
+  count through one function (`services/discount_usage.py`), in the order's transaction, with an update that takes a
+  use only while one is left: of two orders racing for the last use, one is not saved. A v2 order whose cart holds a
+  code that no longer applies (used up, the per-address limit reached, expired, ...) is refused with 409 and the
+  code's reason as `error` (`DISCOUNT_USAGE_LIMIT_REACHED`, ...) instead of being placed without the discount at a
+  total the customer never saw. v1 keeps placing such an order without the code. A v1 order that lost the last use,
+  or took an automatic rule whose code was at `max_used`, no longer answers 403 for an order that was saved; the
+  first is not saved, the second is placed and its code stops counting at the limit. The floor of
+  `entirius-django-utils` moves to 2.1.0 (the v2 handler keeps a 409's code).
+- A discount rule limited to some currencies (`currencies`) applies only to carts in one of them; a rule with none
+  applies in every currency, as before. Only the gratis offer list read the field, so a PLN-only automatic rule
+  discounted an EUR cart, a PLN-only rule could win priority arbitration on an EUR cart and block its codes, and a
+  code on an EUR and a PLN rule (`GRATIS_STEP` in the test package) took the PLN rule on an EUR cart and offered no
+  gift. A code whose rules all leave out the cart currency is rejected as `currency_not_supported` (v2
+  `DISCOUNT_CURRENCY_NOT_SUPPORTED`, meta `currency`); v1 lists it under `one_or_more_discount_invalid`.
+- A bundle counts all of its components when several bundles are checked at once. The links were grouped by
+  adjacent rows of an unordered query, so a bundle whose links came apart kept only the last group of them.
+- v2 API (client-visible): `gratis.rules` of a cart lists the gift rules, as `GET carts/{id}/gratis-rules/` does. It was
+  read from `gratis_rules`, a legacy field nothing fills, so it stayed empty next to `is_available: true`.
+- v2 OpenAPI (client-visible, schema only): `POST orders/` lists `payment_error` in `OrderCreateResponse`. The 201 body
+  has carried `payment_error: true` when the order was created but the payment provider failed, and the schema did
+  not name it. The body is unchanged: the field is there only on a failed payment.
+- v2 OpenAPI (client-visible, schema only): the guest routes (carts and their steps, `countries/`, `POST orders/`)
+  declare the channel key without the customer JWT next to the key with it. They declared
+  `[{ApiKeyAuth: [], jwtAuth: []}]`, both required, though a guest works with `X-API-KEY` alone, so the schema
+  could not tell them from the customer routes (`orders/list/`, `carts/latest/`, merge), which still need both.
+  Access does not change.
+- v2 API (client-visible): `POST orders/` on a cart that cannot become an order yet answers 409 with the reason in
+  `error` (`ADDRESSES_NOT_SELECTED`, `SHIPPING_OPTION_NOT_SELECTED`, `PAYMENT_OPTION_NOT_SELECTED`, `OUT_OF_STOCK`).
+  It answered 500 `INTERNAL_ERROR`, because `OrderValidation` raises a v1 exception the v2 handler does not know, so a
+  customer whose item sold out during checkout got no reason. The v1 response stays 403.
+- v2 API (client-visible): `subtotal_gross` and `subtotal_net` of a cart are the items alone, as the schema says
+  ("before shipping"). They were taken from `base_total`, which adds shipping before its reduction and the payment fee,
+  so the subtotal moved when the customer chose a shipping method: 100.00 of items with free shipping answered
+  `subtotal_gross` 109.99 next to `total_gross` 100.00. `total_gross`, `total_net` and `total_tax` don't change, and
+  neither does `base_total` in the v1 response.
+
+### Added
+
+- `scrub-gateway-payloads`: puts every stored `provider_request` / `provider_notify` through the allowlist, in
+  batches (`iterator()` + `bulk_update`). Dry run unless `--apply`; the output holds counts only.
+- Docs: `docs/api/checkout.md` (Code usage) says what an order that loses the race for a code's last use leaves
+  behind. It has already opened a payment session at the gateway when it rolls back; the customer never gets the
+  session, no money moves, and the gateway keeps it as an abandoned, unpaid session.
+- A discount code is unique per (channel, currency): two rules that share a channel and a currency (a rule
+  without currencies holds every currency) may not hold the same code. The same code on rules of other channels
+  or of other currencies stays allowed (`GRATIS_STEP` on an EUR and a PLN rule). Admin API v2 (client-visible
+  addition): creating or renaming a clashing code, a rule created with one, or new `channels` / `currencies` that
+  make a rule's code clash with a row it did not clash with before answer 400 `VALIDATION_ERROR` with the detail
+  on `code`, `codes.<i>.code`, `currencies` or `channels` and issue `UNIQUE`; nothing is written. The Django admin
+  (code page, the rule's codes inline) refuses the same, and `import-discount-rules` skips a clashing code (and a
+  row whose new channels clash) with a warning. Clashes stored before keep working, and an edit that does not
+  touch them goes through. No migration and no database constraint: the new configuration check
+  `checkout.discount_codes` (`manage.py check --database default --tag checkout.discount_codes`, and the CMS
+  through django-munin) lists the stored ones per channel. Reference: `docs/api/discounts.md`.
+- `django_checkout.output.quantities.get_bundle_quantities(skus, channel_idx)`: how many of each bundle its
+  components allow, as the cart counts a bundle line (the bundle's own Stock row does not decide; with limits, the
+  required and default components). For other modules that answer stock, so a bundle they report available is one
+  the cart accepts. SKUs that are not bundles are left out.
+
+### Changed
+
+- Customer erasure (client-visible) is refused while the shop still has to fulfil one of the customer's orders: one
+  in `new`, `unpaid`, `confirmed`, `holded` or `in_progress`. Nothing is anonymised then, not the other orders, not
+  the carts; v1 answers 409 `OPEN_ORDERS` with the blocking orders' ids, numbers and statuses (no personal data), and
+  `output.admin.admin_customer_delete` raises `ErasureBlocked`. It anonymised the delivery address of an order still
+  to ship. A pinned erase token looks at its channel's orders only. `complete-erasures` is not affected.
+- Gateway payloads are stored through the allowlist on every save, not only at erasure. `provider_request` and
+  `provider_notify` of a `PaymentIntent` keep ids, amounts, currencies, statuses and timestamps, for every provider
+  (PayU, PayU card, BLIK, PayPal, Stripe, Przelewy24, Paynow, Autopay and any other, vouchers included). The buyer,
+  descriptions, URLs, products, signatures and card or BLIK credentials are no longer stored, and a late or
+  redelivered notification after an erasure brings no personal data back. Signatures are still verified on the raw
+  request. Nothing in checkout, the CMS or the test package reads the dropped keys; the Django admin shows the
+  reduced payloads, and a stored Stripe session no longer keeps its `object` type. A payment stored before keeps its
+  payloads until it is saved again (a later notification, an admin edit) or the customer is erased.
+
 ## 10.0.1 — 2026-10-27
 
 ### Added

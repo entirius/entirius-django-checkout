@@ -1931,12 +1931,30 @@ Sub-resource PATCH pattern. Each PATCH sends one concern, returns full cart.
 
 v2 price fields use explicit gross/net naming (aligned with Matrix v2).
 
+### v2 payment return URL
+
+`PATCH carts/{id}/payment/` takes an optional `continue_url`: where the gateway sends the customer back after
+paying, `<order_id>` replaced by the order number (`https://shop.example.org/checkout/success?ref=<order_id>`), at
+most 2048 characters; surrounding spaces are dropped and an empty one means none. It is stored with the payment
+method as v1's `payment_method.continue_url` is, and never returned. PayU (`payu`,
+`payu_card`, `payu_blik`) and Stripe hosted checkout read it; Stripe opens no session without one. Przelewy24,
+PayPal and Paynow return to the URLs in the method's `additional_data`.
+
+The target must be one the payment step accepts, or the PATCH answers 400 (`VALIDATION_ERROR`, `field:
+"continue_url"`) and changes nothing: a scheme in `PAYMENT_REDIRECT_DIRECT_SCHEMES` (default `https`) goes to the
+gateway as it is, any other goes through the payment bridge and needs its scheme in
+`PAYMENT_REDIRECT_BRIDGE_TARGET_SCHEMES` and, for http/https, its host in `PAYMENT_REDIRECT_ALLOWED_HOSTS`. v1
+checks the same rule only when the order starts the payment.
+
 ### v2 cart warnings (`_errors`)
 
 A cart write (create, PATCH items / addresses / discounts / shipping / payment, merge) answers 200/201 with the full
 cart; what went wrong in it is listed under `_errors` (the key is absent when nothing did). Each detail is
 `{scope, field, code, message, meta}`; branch on `code`, `message` is generic English text. Reads (GET) carry no
-`_errors`, and `POST orders/` does not report discount codes: a rejected code is simply not in the order.
+`_errors`. `POST orders/` refuses the order when a code the cart holds no longer applies (another order took its
+last use, the address reached `max_uses_per_user`, it expired, ...): 409 with the code's reason from the table below
+as `error` (`DISCOUNT_USAGE_LIMIT_REACHED`, ...) and the code in `message`. Nothing is ordered and the cart keeps the
+code; the next discounts PATCH drops it and lists it under `_errors`, and the order then goes through at the new total.
 
 Rejected discount codes give `ONE_OR_MORE_DISCOUNT_INVALID` (`field: "cart.discounts.code"`, as before) and then one
 detail per rejected code. `field` is `codes[i].code`, `i` being the code's place among the codes sent (the
@@ -1961,7 +1979,7 @@ detail per rejected code. `field` is `codes[i].code`, `i` being the code's place
 | `DISCOUNT_MIN_ORDER_NOT_MET` | cart total below the rule's `min_order_amount` | `min_order_amount` |
 | `DISCOUNT_LOGIN_REQUIRED` | first-order-for-logged-in rule, guest cart | — |
 | `DISCOUNT_FIRST_ORDER_ONLY` | first-order rule, the email has orders | — |
-| `DISCOUNT_CURRENCY_NOT_SUPPORTED` | the rule has no value for the cart currency | `currency` |
+| `DISCOUNT_CURRENCY_NOT_SUPPORTED` | the rule has no value for the cart currency, or its `currencies` leave the cart currency out | `currency` |
 | `DISCOUNT_DUPLICATE_RULE` | another code of the same rule (or the same code) is already in the cart | — |
 | `DISCOUNT_BLOCKED_BY_EXCLUSIVE_RULE` | a higher-priority rule won arbitration (it or this code is exclusive) | `blocking_code`, only when the client already sees it: a code it sent or a discount applied in this cart |
 | `DISCOUNT_BLOCKED_BY_PRICE_RULES` | the price list allows no discount codes | — |
@@ -1969,3 +1987,114 @@ detail per rejected code. `field` is `codes[i].code`, `i` being the code's place
 
 The meta never carries rule internals (priority, ids, usage counters). v1 responses are unchanged: v1 still gets
 only `one_or_more_discount_invalid` with `affected_values`.
+
+### Code usage
+
+An order, v1 or v2, counts each code it took on `current_used` and writes one `UsedCoupon` row per code with the
+order's e-mail addresses, in the order's transaction. `max_used` is checked against the counter. `max_uses_per_user`
+is checked against the `UsedCoupon` rows of orders in `ORDER_STATUSES_QUALIFIED_TO_DISCOUNT_MAX_PER_USER` (default:
+completed, returned, canceled), matched by e-mail: the account e-mail of a logged-in customer, the address e-mail of
+a guest cart. A cancelled order keeps its use. Of two orders racing for the last use one takes it and the other is
+not saved (v2 409 `DISCOUNT_USAGE_LIMIT_REACHED`, v1 403 `INVALID_REQUEST`). An automatic rule applies whatever its
+code's counter says, so its code counts up to `max_used` and then stops counting; it never refuses an order. A v1
+order whose code no longer applies is still placed without it.
+
+The use is taken after the order is written and its payment started, so the code row is locked for a moment and
+never during a call to a payment gateway. The cost falls on the order that loses the race: with a gateway method
+(PayU, PayPal, Przelewy24, Paynow, Stripe, Autopay) the gateway has already opened a payment session for it when it
+rolls back. The customer never gets that session's redirect URL, so no money moves; the gateway keeps it as an
+abandoned, unpaid session. Nothing of it is left in the shop: the order and its payment intent roll back together,
+and a notification the gateway may still send for that session finds no payment and is logged as an unknown one.
+
+### Stored gateway payloads
+
+`PaymentIntent.provider_request` (what checkout sent to the gateway) and `provider_notify` (what the gateway
+answered or notified) are stored through an allowlist (`utils/gateway_payload.py`), for every provider and on
+every save: transaction and order ids, amounts, currencies, statuses and timestamps. The buyer (name, e-mail,
+phone, address, IP, PayPal payer and payer id, Stripe `customer_details`), descriptions, URLs, product lists,
+signatures and payment credentials are never stored. Signatures are verified on the raw request before anything
+is stored, and a notification that arrives after an erasure is stored the same way, so it brings no personal data
+back. The PayU, PayPal, Stripe and Autopay notification views log and send to BI a payload only through the same
+scrub; Paynow and Przelewy24 notifications carry no buyer data. A payment stored before this release keeps its
+whole payloads until it is saved again (a later notification, an edit in the Django admin) or the customer is
+erased. `manage.py scrub-gateway-payloads` reports how many still hold more (dry run) and reduces them with
+`--apply`.
+
+### Customer erasure
+
+`DELETE /api-admin/checkout/1/{channel}/customer/delete` with `{"email": "<address>"}` (admin key, scope
+`checkout.erase`; `django_checkout.output.admin.admin_customer_delete` is the same for Python callers) anonymises
+the orders and carts of that e-mail. It finds the customer's orders by the account, the `billing_email` /
+`shipping_email` columns, the e-mail of the billing or shipping address in `order_body` and the e-mail a used code
+stored, so a repeated request completes an order an earlier one left half done; carts by the account and the
+address e-mails in `cart_body`. Every match is the whole address, case aside: erasing `anna@example.org` leaves
+`joanna@example.org` alone. A pinned erase token covers its channel only.
+
+Another customer's order or cart that holds the e-mail in some other field keeps everything but that e-mail: in
+every string of the body (a gift card's `recipient_email` in `cart.items[].voucher_gift`, the `comment`, any other
+field) the address becomes the marker, and the rest of the text, the names, the addresses, the e-mail columns and
+the payments stay. The response lists such an order or cart with the others. It never refuses the erasure, even
+while the shop still has to fulfil it: a gift card bought for the erased person then has no address to go to.
+
+| Where | Anonymised | Kept |
+|---|---|---|
+| `order_body` / `cart_body` addresses | first and last name, e-mail, street, city, postcode, phone, company, tax id | country, dialling code, invoice flags, `address_id`, `external_id` |
+| `order_body` / `cart_body` | `comment`, `customer_ip`, gift-card personalisation, payment credentials (`***REDACTED***`, masked voucher codes stay) | totals, items, codes, shipping method and pickup point, `affiliate_code` |
+| `Order` | `billing_email`, `shipping_email` | status, numbers, `customer` (the account erasure in `django_accounts` sets it to NULL) |
+| `UsedCoupon` | `billing_email`, `shipping_email` | the code and the order (`max_uses_per_user` no longer ties the use to the erased e-mail) |
+| `PaymentIntent` | `provider_request`, `provider_notify` stored before payloads went through the allowlist: everything except ids, amounts, currencies, statuses and timestamps; `redirect_url` (`***REDACTED***`: the gateway's payment page or, for BLIK, a copy of the body's `continue_url`; only the order's creation answer hands it out) | `amount`, `currency`, `external_order_id`, `payment_status`, `code` |
+| `PaymentRedirect` | `target_url` (`***REDACTED***`: a copy of the body's `continue_url`) | token, expiry, consumption time |
+
+Names and free text become `x` of the same length, e-mails `x…x@example.com`. Not touched: invoices
+(`Invoice.invoice_base64`, kept for accounting), order attachments, shipping tracking numbers, `Order.extra`
+(integrator data).
+
+#### Orders not fulfilled yet refuse it
+
+While the customer has an order the shop still has to fulfil, the erasure is refused and nothing is anonymised:
+not that order, not the customer's other orders, not the carts. Another customer's order that only holds the
+e-mail never refuses it. A pinned token looks at its channel's orders only.
+
+| Status | Refuses the erasure | Why |
+|---|---|---|
+| `new`, `unpaid` | yes | waiting for payment; a gateway confirms the payment for days after the order, and the shop then ships it |
+| `confirmed` | yes | paid, not shipped |
+| `holded` | yes | on hold; it goes back to `confirmed` or is cancelled |
+| `in_progress` | yes | being prepared, not handed to the carrier yet |
+| `complete` | no | delivered; the tracking number stays for complaints |
+| `returned`, `canceled` | no | nothing left to ship |
+
+v1 answers 409 with the blocking orders' ids, numbers and statuses, never the e-mail or any other personal value:
+
+```json
+{"meta": {"status": "OPEN_ORDERS", "message": "The customer has orders that are not fulfilled yet; nothing was anonymized. Cancel or finish the listed orders, then erase again", ...},
+ "data": {"deleted": false, "blocking_orders": [{"order_id": "<uuid>", "pretty_id": "0100000042", "status": "confirmed"}]}}
+```
+
+The Python API raises `django_checkout.output.admin.ErasureBlocked` instead; its `orders` holds the same
+`BlockingOrder(order_id, pretty_id, status)` entries.
+
+To erase the customer, cancel or finish (ship and complete) every listed order, then send the request again.
+Nothing cancels an order by itself: an abandoned order that waits for payment stays `unpaid` and refuses every
+erasure until someone cancels it, in the CMS or with `POST /api/checkout/v2/admin/{channel}/orders/{uid}/cancel/`. One
+gap stays: a cancelled order whose payment still arrives is confirmed again (logged CRITICAL for manual review,
+`notification_state.confirm_order`); erased in between, it has no address left to ship to.
+
+#### Erasure order: checkout first, then the account
+
+Erase in checkout first, then delete the account in `django_accounts` (`accounts.erase`). Send the account e-mail and
+every address e-mail the customer used in checkout: each request finds the orders and carts of the e-mail it names.
+
+The other way round, deleting the account sets `customer` to NULL on the orders, carts and used codes, and checkout
+can no longer find anything through the account. It then finds an order only by the e-mail sent: in the addresses of
+`order_body`, in the `billing_email` / `shipping_email` columns, or in a `UsedCoupon` row, which keeps the account
+e-mail of a logged-in customer's code. An order placed with another address e-mail and no code is reachable only by
+that address e-mail; a cart only by the e-mail in its addresses. Orders and carts with no e-mail of the customer keep
+no personal data once the account is gone.
+
+#### Orders erased before
+
+Orders erased by an earlier release kept the other fields: `manage.py complete-erasures` reports them (rows whose
+address e-mail is anonymised), `--apply` finishes them, and `--marker-domain <domain>` adds the domain an earlier
+release line anonymised e-mails to, for a database that came from one. The command finishes erasures already made,
+so orders not fulfilled yet do not stop it.

@@ -13,9 +13,11 @@ from django.db import transaction
 from django.db.models import Q
 
 from django_checkout.domain.cart import process_cart
-from django_checkout.domain.validators.order import OrderValidation
+from django_checkout.domain.dto.discount import DiscountsRejectedError
+from django_checkout.domain.validators.order import OrderValidation, refuse_voucher_on_split_order
 from django_checkout.models import Cart, Order, OrderStatusLabel, PaymentMethod
 from django_checkout.schemas.common import format_money
+from django_checkout.services.discount_usage import DiscountCodeRefused, use_discounts
 from django_checkout.utils import payment_entries
 from django_checkout.worker.split_order.split_orders import split_orders_by_attribute
 from django_checkout.worker.split_order.validator import check_that_order_can_be_split
@@ -38,7 +40,10 @@ def create_order(
     geo_country: str | None = None,
     request=None,
 ) -> OrderCreateResult:
-    """Create order from cart. Validates ownership, reserves stock, initiates payment."""
+    """Create order from cart. Validates ownership, reserves stock, initiates payment, counts the discount codes.
+
+    Raises ``DiscountCodeRefused`` when a code the cart applied no longer applies or has no use left.
+    """
     cart = Cart.objects.get(channel=channel, cart_id=cart_id)
     # SECURITY: validate cart ownership — prevent cross-customer order creation
     if cart.customer is not None and cart.customer != customer:
@@ -53,6 +58,8 @@ def create_order(
         is_order_creation=True,
     )
     OrderValidation.validate(cart_id, processed_data)
+    refuse_voucher_on_split_order(messages)
+    _refuse_rejected_codes(messages)
 
     items_to_split, len_parts = check_that_order_can_be_split(cart, channel)
     order = None
@@ -60,17 +67,18 @@ def create_order(
     payment_error = None
     split_pretty_ids = []
 
-    if not len_parts or len_parts <= 1:
-        order, redirect, payment_error = Order.create(
-            processed_data,
-            cart,
-            channel,
-            customer=customer,
-            request=request,
-        )
+    # The order and its code uses commit together: an order that cannot take a code is not saved.
+    with transaction.atomic():
+        if not len_parts or len_parts <= 1:
+            order, redirect, payment_error = Order.create(
+                processed_data,
+                cart,
+                channel,
+                customer=customer,
+                request=request,
+            )
 
-    if len_parts and len_parts > 1:
-        with transaction.atomic():
+        if len_parts and len_parts > 1:
             split_pretty_ids, (order, redirect_split, payment_error) = split_orders_by_attribute(
                 processed_data,
                 channel,
@@ -84,6 +92,8 @@ def create_order(
             if redirect_split:
                 redirect = redirect_split
 
+        use_discounts(order.order_body["cart"]["discounts"], channel, order=order)
+
     if payment_error:
         logger.warning("Payment error for order %s: %s", order.order_id if order else "N/A", payment_error)
 
@@ -93,6 +103,14 @@ def create_order(
         payment_failed=bool(payment_error),
         split_pretty_ids=split_pretty_ids,
     )
+
+
+def _refuse_rejected_codes(messages: list) -> None:
+    """A code the cart applied that no longer applies refuses the order: placed without it, the order would cost
+    more than the cart the customer confirmed. Raises ``DiscountCodeRefused`` for the first such code."""
+    rejected = next((m.rejected for m in messages if isinstance(m, DiscountsRejectedError) and m.rejected), None)
+    if rejected:
+        raise DiscountCodeRefused(rejected[0].code, rejected[0].rejection_reason)
 
 
 def order_lookup_q(uid: str) -> Q:

@@ -426,6 +426,7 @@ def patch_payment(
     card: str | None = None,
     save_card: bool = False,
     pay_code: str | None = None,
+    continue_url: str | None = None,
     customer=None,
     geo_country: str | None = None,
 ) -> tuple[Cart, list]:
@@ -440,7 +441,7 @@ def patch_payment(
         bank_id=bank_id,
         country_code=None,
         authorization_token=None,
-        continue_url=None,
+        continue_url=continue_url,
         save_card=save_card,
         pay_code=pay_code,
     )
@@ -457,6 +458,11 @@ def close_cart(channel: Channel, cart_id: str) -> Cart:
     return record
 
 
+def _bought_lines(checkout_data: CheckoutData) -> list:
+    """The cart's lines without its gifts."""
+    return [item for item in (checkout_data.cart.items or []) if not getattr(item, "is_gratis", False)]
+
+
 def merge_carts(
     channel: Channel,
     target_cart_id: str,
@@ -470,29 +476,27 @@ def merge_carts(
     # SECURITY: validate target cart belongs to the authenticated customer
     if customer and customer_record.customer is not None and customer_record.customer != customer:
         raise Cart.DoesNotExist("Cart does not belong to this customer")
-    guest_record = Cart.objects.filter(cart_id=guest_cart_id, channel=channel, customer=None).first()
+    # Only an open guest cart merges: one that became an order is protected by it and must not be deleted.
+    guest_record = Cart.objects.filter(
+        cart_id=guest_cart_id, channel=channel, customer=None, cart_status=CartStatus.NEW, order__isnull=True
+    ).first()
     if guest_record is None:
         raise Cart.DoesNotExist("Guest cart not found")
 
     checkout_data_customer = _load_checkout_data(customer_record)
     checkout_data_guest = _load_checkout_data(guest_record)
 
-    items_customer = [(item.sku, item.quantity) for item in (checkout_data_customer.cart.items or [])]
-    items_guest = [(item.sku, item.quantity) for item in (checkout_data_guest.cart.items or [])]
+    # Guest lines come last, so the guest's payloads win. Gift lines stay out: a gift is not bought,
+    # it comes back from its code when the merged cart is processed.
+    ordered = _bought_lines(checkout_data_guest)
+    if operation != "override":
+        ordered = _bought_lines(checkout_data_customer) + ordered
 
-    if operation == "override":
-        merged = items_guest
-    else:
-        merged = items_customer + items_guest
-
-    unique_skus = reduce(lambda res, tpl: dict(res, **{tpl[0]: res.get(tpl[0], 0) + tpl[1]}), merged, {})
+    unique_skus = reduce(lambda res, item: dict(res, **{item.sku: res.get(item.sku, 0) + item.quantity}), ordered, {})
 
     # Preserve per-line payloads (extra, voucher_gift) across the merge, else a guest's
-    # gift personalization is lost on login. Guest items come last, so guest wins.
+    # gift personalization is lost on login.
     payloads: dict[str, tuple[dict | None, dict | None]] = {}
-    ordered = list(checkout_data_customer.cart.items or []) + list(checkout_data_guest.cart.items or [])
-    if operation == "override":
-        ordered = list(checkout_data_guest.cart.items or [])
     for item in ordered:
         prev_extra, prev_gift = payloads.get(item.sku, (None, None))
         extra = getattr(item, "extra", None)

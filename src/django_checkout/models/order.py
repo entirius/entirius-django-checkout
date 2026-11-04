@@ -17,6 +17,7 @@ from marshmallow import EXCLUDE
 
 from django_checkout.domain.dto.item import SkuQuantityData
 from django_checkout.domain.dto.order import OrderData
+from django_checkout.domain.payment_selection import settling_payment_method, vouchers_first
 from django_checkout.domain.product import fetch_products_feature, skus_have_attribute
 from django_checkout.enums import CartStatus, OrderStatus, PaymentProvider, ValidationStatus
 from django_checkout.models.item import Item
@@ -28,8 +29,15 @@ from django_checkout.models.shipping import Shipping
 from django_checkout.models.shipping_option import ShippingOption
 from django_checkout.models.stock import Stock
 from django_checkout.models.stock_reservation import StockReservation
+from django_checkout.models.used_coupon import UsedCoupon
 from django_checkout.signals import order_canceled_signal, order_confirmed_signal, order_created_signal
-from django_checkout.utils import anonymize_addresses_in_body, sanitize, scrub_payment_secrets_in_body
+from django_checkout.utils import (
+    REDACTED,
+    anonymize,
+    anonymize_addresses_in_body,
+    sanitize,
+    scrub_payment_secrets_in_body,
+)
 
 if TYPE_CHECKING:
     from django_accounts.models.customer import Customer
@@ -230,11 +238,21 @@ class Order(models.Model):
         # commit order to database
         else:
             with transaction.atomic():
-                is_cash_on_delivery = cart.selected_payment_method.is_cash_on_delivery
-                is_free_order = cart.selected_payment_method.is_free_order
+                # The method that settles the rest: entry [0] may be a voucher, which says nothing about it.
+                settling_method = settling_payment_method(cart.selected_payment_methods)
+                is_cash_on_delivery = settling_method.is_cash_on_delivery
+                is_free_order = settling_method.is_free_order
                 voucher_applied = Decimal(str(getattr(data.cart, "voucher_amount_applied", None) or 0))
                 remaining_to_pay = Decimal(str(getattr(data, "total", None) or 0))
                 fully_voucher_covered = voucher_applied > 0 and remaining_to_pay <= 0
+                from django_checkout.domain.validators.payment import free_order_with_amount_due
+
+                if free_order_with_amount_due([settling_method], remaining_to_pay):
+                    # The cart validation already refuses this; the order must not rely on it alone,
+                    # since the methods are resolved from the stored cart body by code.
+                    raise Exception(
+                        f"Unable to create order for cart {cart.cart_id}: free order with {remaining_to_pay} to pay"
+                    )
                 if is_cash_on_delivery or is_free_order:
                     order_status = OrderStatus.CONFIRMED
                 else:
@@ -412,10 +430,7 @@ class Order(models.Model):
                 redirect_url = None
                 payment_error = None
                 if process_payment:
-                    selected_methods = cart.selected_payment_methods or [cart.selected_payment_method]
-                    for method in selected_methods:
-                        if method is None:
-                            continue
+                    for method in vouchers_first(cart.selected_payment_methods):
                         if fully_voucher_covered and not _is_voucher_method(method, method.code):
                             continue
                         provider = method.get_provider()
@@ -497,17 +512,41 @@ class Order(models.Model):
         return resolve_payment_methods_from_data(self.channel, self.as_data.payment_method)
 
     def anonymize(self) -> bool:
+        """Anonymise the customer's data on the order, its used codes and its payment intents.
+
+        True if any of them held something to anonymise. Every step runs: an `or` chain would short-circuit.
+        """
+        with transaction.atomic():
+            changed = [self._anonymize_own_fields(), self._anonymize_used_coupons(), self._redact_payment_redirects()]
+            changed += [intent.anonymize() for intent in self.payment_items.all()]
+        return any(changed)
+
+    def _anonymize_own_fields(self) -> bool:
         # Operate directly on raw order_body to be resilient to schema drift
         # (e.g. lanks in old orders).
         body = self.order_body or {}
-        # both must run — `or` would short-circuit the second call
-        anonymized = anonymize_addresses_in_body(body)
-        scrubbed = scrub_payment_secrets_in_body(body)
-        save = anonymized or scrubbed
-        if save:
+        changed = [anonymize_addresses_in_body(body), scrub_payment_secrets_in_body(body)]
+        if self.billing_email or self.shipping_email:
+            self.billing_email = anonymize(self.billing_email, "email")
+            self.shipping_email = anonymize(self.shipping_email, "email")
+            changed.append(True)
+        if any(changed):
             self.order_body = sanitize(body)
             self.save()
-        return save
+        return any(changed)
+
+    def _redact_payment_redirects(self) -> bool:
+        """A redirect's target is the body's ``continue_url``, which the body scrub redacts: redact the copy too."""
+        return self.payment_redirects.exclude(target_url=REDACTED).update(target_url=REDACTED) > 0
+
+    def _anonymize_used_coupons(self) -> bool:
+        """The e-mails a used code stores: the address e-mails or, for a logged-in customer, the account one."""
+        coupons = list(self.used_coupons.all())
+        for coupon in coupons:
+            coupon.billing_email = anonymize(coupon.billing_email, "email")
+            coupon.shipping_email = anonymize(coupon.shipping_email, "email")
+        UsedCoupon.objects.bulk_update(coupons, ["billing_email", "shipping_email"])
+        return bool(coupons)
 
     def __str__(self):
         channel_name = self.channel.label if self.channel is not None else ""

@@ -3,6 +3,7 @@
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 import base64
+import hmac
 from urllib.parse import unquote
 from xml.etree import ElementTree as ET  # builds the confirmation only; provider XML is parsed by defusedxml
 
@@ -17,7 +18,8 @@ from process_logger import ProcessLogger
 
 from django_checkout import settings
 from django_checkout.bi import Checkout_AutopayReturnEvent
-from django_checkout.enums import OrderStatus, PaymentIntentStatus
+from django_checkout.domain.payment_provider.notification_state import apply_payment_status
+from django_checkout.enums import PaymentIntentStatus, PaymentProvider
 from django_checkout.models import PaymentIntent
 
 logger = ProcessLogger("PAYMENT_AUTOPAY_PROVIDER_NOTIFY")
@@ -86,7 +88,6 @@ def extract_from_xml(root, separator="|"):
 def autopay_return(request: HttpRequest, channel_idx=None, *args, **kwargs) -> HttpResponse:
     """Funkcja autopay_return() obsługuje żądania POST zawierające dane XML od AutoPay."""
     bev = Checkout_AutopayReturnEvent(is_ongoing_event=True)
-    xml_data = None
 
     try:
         raw_body = request.body.decode("utf-8")
@@ -108,8 +109,7 @@ def autopay_return(request: HttpRequest, channel_idx=None, *args, **kwargs) -> H
         except (ParseError, DefusedXmlException) as e:
             logger.exception(e)
             raise ValueError("Błąd parsowania XML") from e
-        logger.add_log_param("body", xml_data)
-        # Przetwarzanie danych transakcji
+        # Przetwarzanie danych transakcji (the XML itself stays out of the logs: its customerData is the buyer)
         service_id = root.find(".//serviceID").text
         transactions = root.findall(".//transaction")
 
@@ -130,6 +130,14 @@ def autopay_return(request: HttpRequest, channel_idx=None, *args, **kwargs) -> H
             )
             # Weryfikacja hash
             received_hash = root.find(".//hash").text
+            if not (settings.AUTOPAY_HASH_KEY or {}).get(channel_idx):
+                # Without the channel's own non-empty key there is nothing secret to verify the hash with.
+                logger.error(f"AUTOPAY_HASH_KEY has no key for channel {channel_idx}, cannot verify ITN")
+                return HttpResponse(
+                    generate_confirmation_xml(service_id, order_id, "NOTCONFIRMED", received_hash),
+                    content_type="text/xml",
+                    status=400,
+                )
             generate_hash_args = extract_from_xml(root)
             calculated_hash = generate_hash(
                 channel=channel_idx, hash_key=settings.AUTOPAY_HASH_KEY, **generate_hash_args
@@ -146,10 +154,9 @@ def autopay_return(request: HttpRequest, channel_idx=None, *args, **kwargs) -> H
                 "payment_status": payment_status,
                 "payment_status_details": payment_status_details,
                 "is_status_changed": None,
-                "body": xml_data,
             }
 
-            if received_hash != calculated_hash:
+            if not hmac.compare_digest(str(received_hash or "").encode(), calculated_hash.encode()):
                 logger.add_log_param("extra", extra)
                 logger.error("Hash verification failed")
                 return HttpResponse(
@@ -159,14 +166,21 @@ def autopay_return(request: HttpRequest, channel_idx=None, *args, **kwargs) -> H
                 )
 
             with db_transaction.atomic():
+                # The hash was checked with the key of the channel in the URL, so only an Autopay payment
+                # of that channel may follow it; an orderID of another channel or gateway is not found.
+                # The lock stays on the intent and its order, not on the method and channel rows joined in.
                 payment_intent = (
-                    PaymentIntent.objects.select_for_update()
+                    PaymentIntent.objects.select_for_update(of=("self", "order"))
                     .select_related("order")
-                    .filter(external_order_id=order_id)
+                    .filter(
+                        external_order_id=order_id,
+                        order__channel__idx=channel_idx,
+                        method__provider=PaymentProvider.AUTOPAY,
+                    )
                     .first()
                 )
                 if not payment_intent:
-                    extra = {"order_id": order_id, "autopay_response": xml_data, "is_status_changed": False}
+                    extra = {"order_id": order_id, "remote_id": remote_id, "is_status_changed": False}
                     logger.set_log_params({"details": extra})
                     logger.error("There is no PaymentIntent object with the given order ID from AutoPay")
                     bev.finish_with_error(finish_tag="Cannot find related PaymentIntent object", details=extra)
@@ -174,16 +188,14 @@ def autopay_return(request: HttpRequest, channel_idx=None, *args, **kwargs) -> H
 
                 # Aktualizacja statusu płatności
                 if payment_status == "SUCCESS":
-                    payment_intent.payment_status = PaymentIntentStatus.COMPLETE
-                    payment_intent.order.order_status = OrderStatus.CONFIRMED
+                    # A repeated or late SUCCESS must not re-confirm an order that moved on (that fires
+                    # order_confirmed_signal again): notification_state confirms only an order that waits.
+                    outcome = apply_payment_status(payment_intent, PaymentIntentStatus.COMPLETE)
                     confirmation = "CONFIRMED"
-                    extra["is_status_changed"] = True
-                    logger.add_log_param("is_status_changed", True)
-                    logger.info("PaymentIntent status is set to COMPLETE, Order status is set to CONFIRMED")
-                    bev.finish_with_success(
-                        finish_tag="PaymentIntent status is set to COMPLETE, Order status is set to CONFIRMED",
-                        details=extra,
-                    )
+                    extra["is_status_changed"] = outcome.changed
+                    logger.add_log_param("is_status_changed", outcome.changed)
+                    logger.info(outcome.message)
+                    bev.finish_with_success(finish_tag=outcome.message, details=extra)
 
                 elif payment_status == "PENDING":
                     if payment_intent.payment_status == PaymentIntentStatus.COMPLETE:
@@ -268,6 +280,5 @@ def autopay_return(request: HttpRequest, channel_idx=None, *args, **kwargs) -> H
         return HttpResponse(confirmation_xml, content_type="text/xml", status=200)
 
     except Exception as e:
-        logger.add_log_param("body", xml_data)
         logger.exception(e)
         return HttpResponse("An error occurred while processing the XML request", status=500)

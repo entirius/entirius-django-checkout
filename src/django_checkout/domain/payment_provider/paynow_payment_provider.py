@@ -143,10 +143,8 @@ class PayNowPaymentProvider(BasePaymentProvider, ProcessLoggerMixin):
         ):
             additional_info["phone"] = Phone(number=phone_number, prefix=dialling_code)
         else:
-            self.logger.info(
-                "Phone number or dialling code is not valid",
-                extra={"phone_number": phone_number, "dialling_code": dialling_code, "order_id": order.order_id},
-            )
+            # The number is the customer's: the log line names the order only.
+            self.logger.info("Phone number or dialling code is not valid", extra={"order_id": order.order_id})
             additional_info["phone"] = Phone(number="n/a", prefix="n/a")
 
         validity_time = settings.PAYNOW_VALIDITY_TIME_SECONDS or (
