@@ -136,7 +136,8 @@ toggles and defaults: `docs/configuration.md`.
 - `payment_method` is a list (`[voucher, gateway]`): a provider reads its own entry (`own_payment_data`), never
   `primary_payment_method`; which method settles the rest and that vouchers are debited first live in
   `domain/payment_selection.py`. The method that settles the rest carries the cart's fee and cash on delivery
-  (`process_cart`, `Order.create`); the cart status and product limits read every entry. A voucher on a cart that splits is refused (`voucher_not_supported_on_split_order`):
+  (`process_cart`, `Order.create`) and its PaymentIntent the status the payment bridge reports
+  (`settling_payment_intent`; never `payment_items.first()`); the cart status and product limits read every entry. A voucher on a cart that splits is refused (`voucher_not_supported_on_split_order`):
   split parts are created with the gateway alone.
 - PayU notifications need `second_key` in the method's `additional_data` (403 without it); `checks.py` reports
   PayU methods that lack it as `django_checkout.W001` (database-tagged: `manage.py check --database default`).

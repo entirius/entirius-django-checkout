@@ -9,6 +9,7 @@ from django.core.checks import Tags, run_checks
 from django.core.checks import Warning as CheckWarning
 from django.db import ProgrammingError
 
+from django_checkout.checks import payu_methods_have_second_key
 from django_checkout.enums import PaymentProvider
 from django_checkout.models import PaymentMethod
 from django_checkout.models.payment_method import PaymentMethodQuerySet
@@ -78,7 +79,9 @@ def test_a_database_without_the_tables_reports_nothing(monkeypatch):
 
     monkeypatch.setattr(PaymentMethodQuerySet, "__iter__", no_table)
 
-    assert _payu_warnings() == []
+    # This check alone: run_checks() also runs other apps' database checks (django_access reads its users), and the
+    # test has no database to give them.
+    assert payu_methods_have_second_key(None, databases=["default"]) == []
 
 
 PAYPAL_CHECK_ID = "django_checkout.W002"
