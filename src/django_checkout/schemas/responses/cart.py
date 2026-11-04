@@ -9,6 +9,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from django_checkout.enums import ItemStatus
 from django_checkout.schemas.common import format_money, format_tax_rate
 from django_checkout.schemas.responses.address import AddressesResponse
 
@@ -282,8 +283,13 @@ class CartV2Response(BaseModel):
     currency: str | None = Field(None, description="Currency code", examples=["EUR"])
 
     # Cart totals
-    subtotal_gross: str = Field(description="Cart subtotal gross (before shipping)", examples=["399.98"])
-    subtotal_net: str | None = Field(None, description="Cart subtotal net", examples=["325.19"])
+    subtotal_gross: str = Field(
+        description="Valid items at catalogue price, gross: before special prices, discounts, shipping and the payment fee",
+        examples=["499.98"],
+    )
+    subtotal_net: str | None = Field(
+        None, description="Net of subtotal_gross: the items' catalogue net", examples=["406.49"]
+    )
     total_gross: str = Field(description="Cart total gross (incl shipping + fee)", examples=["419.97"])
     total_net: str | None = Field(None, description="Cart total net", examples=["341.44"])
     total_tax: str | None = Field(None, description="Total tax amount", examples=["78.53"])
@@ -366,10 +372,15 @@ class CartV2Response(BaseModel):
                     discounts.append(DiscountResponse.from_domain(d))
 
         # Compute net totals from gross
-        base_total = Decimal(str(checkout_data.base_total)) if checkout_data.base_total else Decimal("0")
+        # The subtotal is the items alone: `base_total` and `total_tax` also hold shipping and the payment fee.
+        # It is the valid items at catalogue price, and its net is their catalogue net: `cart.tax_amount` is the tax
+        # after special prices and discounts, so the gross minus it is neither net.
+        items_total = cart.base_total_price if cart and cart.base_total_price is not None else checkout_data.base_total
+        subtotal_gross = Decimal(str(items_total)) if items_total else Decimal("0")
+        valid_nets = [Decimal(i.total_net) for i in items if i.status == ItemStatus.VALID.value and i.total_net]
         total = Decimal(str(checkout_data.total)) if checkout_data.total else Decimal("0")
         total_tax = Decimal(str(checkout_data.total_tax)) if checkout_data.total_tax else Decimal("0")
-        subtotal_net = base_total - total_tax if total_tax else None
+        subtotal_net = sum(valid_nets, Decimal("0")) if valid_nets else None
         total_net = total - total_tax if total_tax else None
 
         # Discount totals
@@ -413,7 +424,7 @@ class CartV2Response(BaseModel):
                 else str(checkout_data.validation_status)
             ),
             currency=checkout_data.currency_code,
-            subtotal_gross=format_money(base_total),
+            subtotal_gross=format_money(subtotal_gross),
             subtotal_net=format_money(subtotal_net),
             total_gross=format_money(total),
             total_net=format_money(total_net),
