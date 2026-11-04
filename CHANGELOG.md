@@ -73,6 +73,12 @@
 
 ### Fixed
 
+- A voucher on a cart that splits into several orders is refused (client-visible). The cart reports
+  `voucher_not_supported_on_split_order` (v2 `_errors` code `VOUCHER_NOT_SUPPORTED_ON_SPLIT_ORDER`, v1 `extra`
+  `split_parts`) and stays `invalid`; `POST orders/` refuses it with v2 409 and that `error`, v1 403 and that
+  `status`. Each part of a split is created with the gateway alone, so the voucher reached none of the parts: they
+  added up to the full amount and the voucher kept its balance. A split without a voucher and a voucher without a
+  split are not affected.
 - An order paid with a voucher and another method debits the voucher before any gateway is asked: with the gateway
   listed first its session existed before the debit, and a debit that failed rolled the order back while the session
   stayed payable. Cash on delivery and free order come from the method that pays the rest, not from entry `[0]`: a
