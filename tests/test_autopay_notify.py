@@ -5,7 +5,8 @@
 """Autopay ITNs: which ones may change a payment, and how far.
 
 An ITN is verified with the non-empty ``AUTOPAY_HASH_KEY`` entry of the channel in the URL;
-without one nothing is verified, so nothing passes.
+without one nothing is verified, so nothing passes. A verified ITN reaches only an Autopay payment
+of that channel.
 
 ITNs are hashed the way Autopay hashes them (the SDK's ``generate_hash`` over the XML fields).
 """
@@ -121,4 +122,38 @@ def test_itn_hashed_with_another_key_is_rejected(channel, customer):
     response = _itn(channel, "SUCCESS", key="synthetic-other-key")
 
     assert response.status_code == 400
+    assert _state(payment_intent) == UNTOUCHED
+
+
+# --- The hash key belongs to one channel and one gateway ------------------------------------
+
+
+@pytest.mark.django_db
+def test_itn_hashed_for_one_channel_cannot_confirm_another_channels_order(channel, other_channel, customer):
+    """The key comes from the channel in the URL; the orderID must not reach a payment of another channel."""
+    payment_intent = _intent(other_channel, customer)
+
+    response = _itn(channel, "SUCCESS")
+
+    assert response.status_code != 200
+    assert _state(payment_intent) == UNTOUCHED
+
+
+@pytest.mark.django_db
+def test_itn_cannot_confirm_another_gateways_payment(channel, customer):
+    method = PaymentMethod.objects.create(
+        channel=channel, code="payu", provider=PaymentProvider.PAYU, name_t9n={"en": "PayU"}
+    )
+    order = Order.objects.create(channel=channel, customer=customer, order_status=OrderStatus.UNPAID, order_body={})
+    payment_intent = PaymentIntent.objects.create(
+        order=order,
+        method=method,
+        code="payu",
+        external_order_id=AUTOPAY_ORDER_ID,
+        payment_status=PaymentIntentStatus.PENDING,
+    )
+
+    response = _itn(channel, "SUCCESS")
+
+    assert response.status_code != 200
     assert _state(payment_intent) == UNTOUCHED

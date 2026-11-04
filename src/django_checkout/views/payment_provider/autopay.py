@@ -18,7 +18,7 @@ from process_logger import ProcessLogger
 
 from django_checkout import settings
 from django_checkout.bi import Checkout_AutopayReturnEvent
-from django_checkout.enums import OrderStatus, PaymentIntentStatus
+from django_checkout.enums import OrderStatus, PaymentIntentStatus, PaymentProvider
 from django_checkout.models import PaymentIntent
 
 logger = ProcessLogger("PAYMENT_AUTOPAY_PROVIDER_NOTIFY")
@@ -168,10 +168,17 @@ def autopay_return(request: HttpRequest, channel_idx=None, *args, **kwargs) -> H
                 )
 
             with db_transaction.atomic():
+                # The hash was checked with the key of the channel in the URL, so only an Autopay payment
+                # of that channel may follow it; an orderID of another channel or gateway is not found.
+                # The lock stays on the intent and its order, not on the method and channel rows joined in.
                 payment_intent = (
-                    PaymentIntent.objects.select_for_update()
+                    PaymentIntent.objects.select_for_update(of=("self", "order"))
                     .select_related("order")
-                    .filter(external_order_id=order_id)
+                    .filter(
+                        external_order_id=order_id,
+                        order__channel__idx=channel_idx,
+                        method__provider=PaymentProvider.AUTOPAY,
+                    )
                     .first()
                 )
                 if not payment_intent:
