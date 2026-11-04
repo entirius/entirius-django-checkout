@@ -18,7 +18,8 @@ from process_logger import ProcessLogger
 
 from django_checkout import settings
 from django_checkout.bi import Checkout_AutopayReturnEvent
-from django_checkout.enums import OrderStatus, PaymentIntentStatus, PaymentProvider
+from django_checkout.domain.payment_provider.notification_state import apply_payment_status
+from django_checkout.enums import PaymentIntentStatus, PaymentProvider
 from django_checkout.models import PaymentIntent
 
 logger = ProcessLogger("PAYMENT_AUTOPAY_PROVIDER_NOTIFY")
@@ -190,16 +191,14 @@ def autopay_return(request: HttpRequest, channel_idx=None, *args, **kwargs) -> H
 
                 # Aktualizacja statusu płatności
                 if payment_status == "SUCCESS":
-                    payment_intent.payment_status = PaymentIntentStatus.COMPLETE
-                    payment_intent.order.order_status = OrderStatus.CONFIRMED
+                    # A repeated or late SUCCESS must not re-confirm an order that moved on (that fires
+                    # order_confirmed_signal again): notification_state confirms only an order that waits.
+                    outcome = apply_payment_status(payment_intent, PaymentIntentStatus.COMPLETE)
                     confirmation = "CONFIRMED"
-                    extra["is_status_changed"] = True
-                    logger.add_log_param("is_status_changed", True)
-                    logger.info("PaymentIntent status is set to COMPLETE, Order status is set to CONFIRMED")
-                    bev.finish_with_success(
-                        finish_tag="PaymentIntent status is set to COMPLETE, Order status is set to CONFIRMED",
-                        details=extra,
-                    )
+                    extra["is_status_changed"] = outcome.changed
+                    logger.add_log_param("is_status_changed", outcome.changed)
+                    logger.info(outcome.message)
+                    bev.finish_with_success(finish_tag=outcome.message, details=extra)
 
                 elif payment_status == "PENDING":
                     if payment_intent.payment_status == PaymentIntentStatus.COMPLETE:

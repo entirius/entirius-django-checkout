@@ -6,7 +6,8 @@
 
 An ITN is verified with the non-empty ``AUTOPAY_HASH_KEY`` entry of the channel in the URL;
 without one nothing is verified, so nothing passes. A verified ITN reaches only an Autopay payment
-of that channel.
+of that channel, and a SUCCESS confirms an order only while it waits for payment
+(``domain/payment_provider/notification_state.py``).
 
 ITNs are hashed the way Autopay hashes them (the SDK's ``generate_hash`` over the XML fields).
 """
@@ -157,3 +158,60 @@ def test_itn_cannot_confirm_another_gateways_payment(channel, customer):
 
     assert response.status_code != 200
     assert _state(payment_intent) == UNTOUCHED
+
+
+# --- A repeated SUCCESS confirms nothing twice --------------------------------------------
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("order_status", [OrderStatus.IN_PROGRESS, OrderStatus.COMPLETED, OrderStatus.RETURNED])
+def test_repeated_success_leaves_an_order_that_moved_on(channel, customer, order_status):
+    payment_intent = _intent(channel, customer, PaymentIntentStatus.COMPLETE, order_status)
+
+    response = _itn(channel, "SUCCESS")
+
+    assert response.status_code == 200
+    assert b"<confirmation>CONFIRMED</confirmation>" in response.content
+    assert _state(payment_intent) == (PaymentIntentStatus.COMPLETE, order_status)
+
+
+@pytest.mark.django_db
+def test_success_keeps_an_order_moved_on_before_the_payment_was_recorded(channel, customer):
+    payment_intent = _intent(channel, customer, order_status=OrderStatus.IN_PROGRESS)
+
+    _itn(channel, "SUCCESS")
+
+    assert _state(payment_intent) == (PaymentIntentStatus.COMPLETE, OrderStatus.IN_PROGRESS)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("payment_status", ["PENDING", "FAILURE"])
+def test_completed_payment_is_still_never_downgraded(channel, customer, payment_status):
+    payment_intent = _intent(channel, customer, PaymentIntentStatus.COMPLETE, OrderStatus.CONFIRMED)
+
+    _itn(channel, payment_status)
+
+    assert _state(payment_intent) == (PaymentIntentStatus.COMPLETE, OrderStatus.CONFIRMED)
+
+
+@pytest.mark.django_db
+def test_success_finish_tag_keeps_its_wording(channel, customer, monkeypatch):
+    """BI reports group notifications by finish tag; the state rules must not rename them."""
+    tags = []
+
+    class RecordingEvent:
+        def __init__(self, **kwargs):
+            pass
+
+        def finish_with_success(self, finish_tag, details=None):
+            tags.append(finish_tag)
+
+        def finish_with_error(self, finish_tag, details=None, error_message=None):
+            tags.append(finish_tag)
+
+    monkeypatch.setattr(autopay_views, "Checkout_AutopayReturnEvent", RecordingEvent)
+    _intent(channel, customer)
+
+    _itn(channel, "SUCCESS")
+
+    assert tags == ["PaymentIntent status is set to COMPLETE, Order status is set to CONFIRMED"]

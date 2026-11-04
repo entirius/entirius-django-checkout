@@ -16,6 +16,9 @@
   records a cancellation only: for an approved or completed PayPal order it changes nothing and captures nothing.
   BI finish tags keep their wording; new outcomes add their own (`..., Order status <status> kept`,
   `PaymentIntent is already <status>, <status> ignored`).
+- Autopay: a repeated or late `SUCCESS` ITN confirms an order only while it waits for payment, through the same
+  rules; an order in progress, completed or returned keeps its status. A COMPLETE payment was already never
+  downgraded. BI finish tags keep their wording.
 - Paynow: notifications go through the same rules: a late or repeated status no longer pulls a COMPLETE payment
   back, re-confirms an order that moved on, or cancels an order confirmed by hand. BI finish tags keep their wording.
 
