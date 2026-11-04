@@ -1931,6 +1931,21 @@ Sub-resource PATCH pattern. Each PATCH sends one concern, returns full cart.
 
 v2 price fields use explicit gross/net naming (aligned with Matrix v2).
 
+### v2 payment return URL
+
+`PATCH carts/{id}/payment/` takes an optional `continue_url`: where the gateway sends the customer back after
+paying, `<order_id>` replaced by the order number (`https://shop.example.org/checkout/success?ref=<order_id>`), at
+most 2048 characters; surrounding spaces are dropped and an empty one means none. It is stored with the payment
+method as v1's `payment_method.continue_url` is, and never returned. PayU (`payu`,
+`payu_card`, `payu_blik`) and Stripe hosted checkout read it; Stripe opens no session without one. Przelewy24,
+PayPal and Paynow return to the URLs in the method's `additional_data`.
+
+The target must be one the payment step accepts, or the PATCH answers 400 (`VALIDATION_ERROR`, `field:
+"continue_url"`) and changes nothing: a scheme in `PAYMENT_REDIRECT_DIRECT_SCHEMES` (default `https`) goes to the
+gateway as it is, any other goes through the payment bridge and needs its scheme in
+`PAYMENT_REDIRECT_BRIDGE_TARGET_SCHEMES` and, for http/https, its host in `PAYMENT_REDIRECT_ALLOWED_HOSTS`. v1
+checks the same rule only when the order starts the payment.
+
 ### v2 cart warnings (`_errors`)
 
 A cart write (create, PATCH items / addresses / discounts / shipping / payment, merge) answers 200/201 with the full
