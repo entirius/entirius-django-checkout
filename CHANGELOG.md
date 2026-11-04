@@ -25,7 +25,6 @@
   of a confirmed order keeps its wording.
 - Paynow: notifications go through the same rules: a late or repeated status no longer pulls a COMPLETE payment
   back, re-confirms an order that moved on, or cancels an order confirmed by hand. BI finish tags keep their wording.
-
 - Paynow: `notify/paynow/` changes only a Paynow payment (another gateway's payment is answered 404, like any other
   refused notification), and the `Signature` header is compared in constant time.
 - Przelewy24: `notify/przelewy24/` changes only a Przelewy24 payment: a notification naming another gateway's
@@ -38,9 +37,6 @@
 - Autopay: a repeated or late `SUCCESS` ITN confirms an order only while it waits for payment, through the same
   rules; an order in progress, completed or returned keeps its status. A COMPLETE payment was already never
   downgraded. BI finish tags keep their wording.
-- Paynow: notifications go through the same rules: a late or repeated status no longer pulls a COMPLETE payment
-  back, re-confirms an order that moved on, or cancels an order confirmed by hand. BI finish tags keep their wording.
-
 - Autopay: `notify/autopay/` verifies an ITN only with a non-empty `AUTOPAY_HASH_KEY` entry of the channel in the
   URL; without one the ITN is answered 400 `NOTCONFIRMED` (it was 500 for a channel missing from the setting). The
   hash is compared in constant time.
@@ -52,15 +48,10 @@
 - PayU: signed notifications (`payu`, `payu_card`, `payu_blik`) go through the same rules: a late or repeated status
   no longer pulls a COMPLETE payment back, re-confirms an order that moved on, or cancels an order confirmed by hand
   and releases its stock. BI finish tags keep their wording.
-
-- Paynow: notifications go through the same rules: a late or repeated status no longer pulls a COMPLETE payment
-  back, re-confirms an order that moved on, or cancels an order confirmed by hand. BI finish tags keep their wording.
-
 - Stripe: `notify/stripe/` verifies an event only with a non-empty `endpoint_secret` of the channel's Stripe
   payment method; without one the event is answered 400. The view no longer sets the process-wide
   `stripe.api_key`, and a request without a `Stripe-Signature` header is answered 400 instead of 500.
 - Stripe: a verified event changes only a Stripe payment of the channel whose endpoint secret verified it.
-
 
 ### Upgrade notes
 
@@ -82,25 +73,52 @@
   stay. The request also finds orders by those e-mail columns and by the e-mail a used code stored (the account
   e-mail of a deleted account), so repeating it completes an order an earlier erasure left half done. New command
   `complete-erasures` finishes the orders and carts erased before this release (dry run unless `--apply`).
+- Stripe: a line of several units with a cart discount is charged its discounted total. Its `unit_amount` was the
+  unit price less the discount of the whole line, and Stripe multiplies `unit_amount` by the quantity: 3 x 54.99 at
+  15 % off charged 90.72 instead of 140.22, and a large discount sent a negative amount Stripe refused. Lines carry
+  the sold unit price; what the cart takes off its items (cart discounts, a gift's price, a voucher taken off the
+  total) goes into one `amount_off` coupon per session, single use, in the order's currency, on the payment method's
+  account. A gift was charged its product's full price, and a voucher on top of the card. The coupon is named by
+  `localized_names.discount` in the method's `additional_data` (default `Discount`).
+- A voucher on a cart that splits into several orders is refused (client-visible). The cart reports
+  `voucher_not_supported_on_split_order` (v2 `_errors` code `VOUCHER_NOT_SUPPORTED_ON_SPLIT_ORDER`, v1 `extra`
+  `split_parts`) and stays `invalid`; `POST orders/` refuses it with v2 409 and that `error`, v1 403 and that
+  `status`. Each part of a split is created with the gateway alone, so the voucher reached none of the parts: they
+  added up to the full amount and the voucher kept its balance. A split without a voucher and a voucher without a
+  split are not affected.
+- An order paid with a voucher and another method debits the voucher before any gateway is asked: with the gateway
+  listed first its session existed before the debit, and a debit that failed rolled the order back while the session
+  stayed payable. Cash on delivery and free order come from the method that pays the rest, not from entry `[0]`: a
+  voucher with cash on delivery left the order `unpaid` instead of `confirmed`. The free-order check of
+  `Order.create` reads that method too.
+- A gateway paid next to a voucher (`payment_method` `[voucher, gateway]`) reads its own entry of the list, not
+  entry `[0]`, which is the voucher's. PayU (`payu`, `payu_card`, `payu_blik`) and Stripe got no return URL
+  (`continueUrl`, `success_url`; Stripe refuses a session without one) and PayU card no card token. BLIK sent the
+  customer's BLIK code on no order, with or without a voucher: it looked for `pay_code` on the list itself. PayPal's
+  breakdown carries the voucher in `discount`: the amount is net of the voucher and the parts were not, so PayPal
+  refused the order.
+- `cheapest_gratis` and `most_expensive_gratis` give their discount (client-visible: cart totals drop). The rule's
+  units of the chosen item (`extra_value`, at most what the cart holds) come at the gift price, as a picked gift does
+  (`GRATIS_PERCENT_DISCOUNT` down to `GRATIS_PRICE`, or `GRATIS_PRICE` under `GRATIS_MECHANISM = 2`), never above
+  the item's own price; a channel that discounts net prices gets the same gift price. The discount was computed and
+  then overwritten with the item's earlier discount, so the code came out valid at 0. The item is picked by price
+  among the bought lines: a gift line, always the cheapest at the gift price, is never picked, and a line with more
+  units no longer wins over a cheaper (or dearer) one; quantity only breaks a price tie.
+- Merging a guest cart into the customer's cart no longer fails, v1 (`carts/{id}/merge/`) and v2
+  (`POST carts/{id}/merge/`). `CartRequest.factory()` left out five fields the request requires
+  (`custom_order_id`, `requested_delivery_date`, `split_order`, `affiliate_code`, `customer_ip`), so every merge
+  raised `TypeError`: v2 answered 500, v1 500 `Internal Exception`. A gift line is no longer summed into the merged
+  quantities as a bought unit: the customer's gift comes back from its code, and a guest's gift goes with the guest's
+  codes, which a merge does not carry over. A guest cart that already became an order (or is no longer open) answers
+  404 and stays as it is; deleting it after the merge raised `ProtectedError`, another 500. v1 merges through the
+  same service as v2, so it keeps each line's `extra` and `voucher_gift` as v2 does.
+- The PayPal `webhook_id` warning (`django_checkout.W002`) reaches the CMS: it carries the `entirius_config` tag
+  django-munin collects, and names the methods in its hint.
 - Stripe: `notify/stripe/` stores the checkout session as plain JSON. With stripe 12 or later (the lock pins 15) a
   `StripeObject` is no dict, so saving it in `provider_notify` raised and every verified session event answered
   500 without changing the payment.
 - PayPal: the buyer's return (`return/paypal/`) saves the status PayPal's capture API reports on the payment and
   the order. It answered 500 after the capture and saved nothing, so only the webhook confirmed PayPal orders.
-### Added
-
-- A discount code is unique per (channel, currency): two rules that share a channel and a currency (a rule
-  without currencies holds every currency) may not hold the same code. The same code on rules of other channels
-  or of other currencies stays allowed (`GRATIS_STEP` on an EUR and a PLN rule). Admin API v2 (client-visible
-  addition): creating or renaming a clashing code, a rule created with one, or new `channels` / `currencies` that
-  make a rule's code clash with a row it did not clash with before answer 400 `VALIDATION_ERROR` with the detail
-  on `code`, `codes.<i>.code`, `currencies` or `channels` and issue `UNIQUE`; nothing is written. The Django admin
-  (code page, the rule's codes inline) refuses the same, and `import-discount-rules` skips a clashing code (and a
-  row whose new channels clash) with a warning. Clashes stored before keep working, and an edit that does not
-  touch them goes through. No migration and no database constraint: the new configuration check
-  `checkout.discount_codes` (`manage.py check --database default --tag checkout.discount_codes`, and the CMS
-  through django-munin) lists the stored ones per channel. Reference: `docs/api/discounts.md`.
-
 - A gift of a SKU the customer also buys is a line of its own: it no longer replaces the bought line (a bought mug
   and the same mug picked as the gift came out as one mug at the gift price, `changed_price`). The gift is refused
   when the bought units and the gift together exceed the saleable stock, and a gift above the stock is no longer
@@ -134,11 +152,6 @@
   code on an EUR and a PLN rule (`GRATIS_STEP` in the test package) took the PLN rule on an EUR cart and offered no
   gift. A code whose rules all leave out the cart currency is rejected as `currency_not_supported` (v2
   `DISCOUNT_CURRENCY_NOT_SUPPORTED`, meta `currency`); v1 lists it under `one_or_more_discount_invalid`.
-- `django_checkout.output.quantities.get_bundle_quantities(skus, channel_idx)`: how many of each bundle its
-  components allow, as the cart counts a bundle line (the bundle's own Stock row does not decide; with limits, the
-  required and default components). For other modules that answer stock, so a bundle they report available is one
-  the cart accepts. SKUs that are not bundles are left out.
-
 - A bundle counts all of its components when several bundles are checked at once. The links were grouped by
   adjacent rows of an unordered query, so a bundle whose links came apart kept only the last group of them.
 - v2 API (client-visible): `gratis.rules` of a cart lists the gift rules, as `GET carts/{id}/gratis-rules/` does. It was
@@ -161,6 +174,26 @@
   `subtotal_gross` 109.99 next to `total_gross` 100.00. `total_gross`, `total_net` and `total_tax` don't change, and
   neither does `base_total` in the v1 response.
 
+### Added
+
+- Docs: `docs/api/checkout.md` (Code usage) says what an order that loses the race for a code's last use leaves
+  behind. It has already opened a payment session at the gateway when it rolls back; the customer never gets the
+  session, no money moves, and the gateway keeps it as an abandoned, unpaid session.
+- A discount code is unique per (channel, currency): two rules that share a channel and a currency (a rule
+  without currencies holds every currency) may not hold the same code. The same code on rules of other channels
+  or of other currencies stays allowed (`GRATIS_STEP` on an EUR and a PLN rule). Admin API v2 (client-visible
+  addition): creating or renaming a clashing code, a rule created with one, or new `channels` / `currencies` that
+  make a rule's code clash with a row it did not clash with before answer 400 `VALIDATION_ERROR` with the detail
+  on `code`, `codes.<i>.code`, `currencies` or `channels` and issue `UNIQUE`; nothing is written. The Django admin
+  (code page, the rule's codes inline) refuses the same, and `import-discount-rules` skips a clashing code (and a
+  row whose new channels clash) with a warning. Clashes stored before keep working, and an edit that does not
+  touch them goes through. No migration and no database constraint: the new configuration check
+  `checkout.discount_codes` (`manage.py check --database default --tag checkout.discount_codes`, and the CMS
+  through django-munin) lists the stored ones per channel. Reference: `docs/api/discounts.md`.
+- `django_checkout.output.quantities.get_bundle_quantities(skus, channel_idx)`: how many of each bundle its
+  components allow, as the cart counts a bundle line (the bundle's own Stock row does not decide; with limits, the
+  required and default components). For other modules that answer stock, so a bundle they report available is one
+  the cart accepts. SKUs that are not bundles are left out.
 
 ## 10.0.1 — 2026-10-27
 

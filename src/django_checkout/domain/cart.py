@@ -11,11 +11,13 @@ from django_utils.api.responses import ErrorInfo
 from django_checkout.domain.dto.cart import CartRequest, CheckoutData
 from django_checkout.domain.dto.discount import DiscountsRejectedError
 from django_checkout.domain.dto.item import SkuQuantityData
+from django_checkout.domain.payment_selection import is_voucher_method
 from django_checkout.domain.prices import calc_fee_of_price
 from django_checkout.domain.validators.address import validate_addresses
 from django_checkout.domain.validators.cart import check_min_order_price, validate_cart_data
 from django_checkout.domain.validators.delivery_date import validator_delivery_date
 from django_checkout.domain.validators.item import get_item_list_status
+from django_checkout.domain.validators.order import voucher_on_split_order_error
 from django_checkout.domain.validators.payment import (
     FREE_ORDER_AMOUNT_DUE_CODE,
     free_order_with_amount_due,
@@ -25,10 +27,12 @@ from django_checkout.domain.validators.shipping import get_shipping_method_optio
 from django_checkout.enums import ValidationStatus
 from django_checkout.settings import CUSTOMS_THRESHOLD_ENABLED
 from django_checkout.utils.api.utils import resolve_country, resolve_currency, resolve_language
+from django_checkout.worker.split_order.validator import check_that_order_can_be_split
 
 if TYPE_CHECKING:
     from django_accounts.models.customer import Customer
 
+    from django_checkout.models.cart import Cart
     from django_checkout.models.channel import Channel
 
 
@@ -44,6 +48,18 @@ def _sent_discount_codes(data: CartRequest, checkout_data: CheckoutData) -> list
     """The codes the customer entered, in the order sent: the request's, else the stored cart's."""
     discounts = getattr(data.cart, "discounts", None) or getattr(checkout_data.cart, "discounts", None) or []
     return [d.code for d in discounts if d.code and not getattr(d, "is_automatic", False)]
+
+
+def voucher_split_parts(cart: "Cart | None", channel: "Channel", carries_voucher: bool) -> int:
+    """How many orders a cart that carries a voucher splits into; 0 when it does not split or carries none.
+
+    Each part of a split is created with one payment method, the gateway, so a voucher reaches none of them: the
+    parts add up to the full amount and the voucher keeps its balance.
+    """
+    if cart is None or not carries_voucher:
+        return 0
+    _items, parts = check_that_order_can_be_split(cart, channel)
+    return parts if parts and parts > 1 else 0
 
 
 def process_cart(
@@ -339,6 +355,17 @@ def process_cart(
     if msg:
         messages.append(msg)
 
+    # A voucher on a cart that splits is refused here, while the customer can still change the cart. The voucher
+    # is an amount taken off the total, or a payment entry: by code in the request's entries (no provider there),
+    # by provider in the channel's methods (none resolve while the cart has no address).
+    carries_voucher = not split_order_data and (
+        Decimal(str(validated_cart_data.voucher_amount_applied or 0)) > 0
+        or any(is_voucher_method(pm) for pm in [*(validated_payments or []), *(payment_methods or [])])
+    )
+    split_parts = voucher_split_parts(cart, channel, carries_voucher)
+    if split_parts:
+        messages.append(voucher_on_split_order_error(split_parts))
+
     # Voucher coverage check: if the only payment method is voucher AND voucher
     # balance did not cover the full cart total, the remaining amount is
     # unpaid. Block the cart until customer adds another payment method (e.g.
@@ -438,6 +465,7 @@ def process_cart(
             and validated_addresses is not None
             and validated_shipping is not None
             and validated_payment is not None
+            and not split_parts
             and is_delivery_date_valid
             and not order_total_too_low
             and not voucher_coverage_insufficient

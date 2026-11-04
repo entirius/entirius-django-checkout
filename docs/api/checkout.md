@@ -1984,6 +1984,13 @@ not saved (v2 409 `DISCOUNT_USAGE_LIMIT_REACHED`, v1 403 `INVALID_REQUEST`). An 
 code's counter says, so its code counts up to `max_used` and then stops counting; it never refuses an order. A v1
 order whose code no longer applies is still placed without it.
 
+The use is taken after the order is written and its payment started, so the code row is locked for a moment and
+never during a call to a payment gateway. The cost falls on the order that loses the race: with a gateway method
+(PayU, PayPal, Przelewy24, Paynow, Stripe, Autopay) the gateway has already opened a payment session for it when it
+rolls back. The customer never gets that session's redirect URL, so no money moves; the gateway keeps it as an
+abandoned, unpaid session. Nothing of it is left in the shop: the order and its payment intent roll back together,
+and a notification the gateway may still send for that session finds no payment and is logged as an unknown one.
+
 ### Customer erasure
 
 `DELETE /api-admin/checkout/1/{channel}/customer/delete` with `{"email": "<address>"}` (admin key, scope

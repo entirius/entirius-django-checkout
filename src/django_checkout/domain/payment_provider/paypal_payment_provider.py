@@ -151,6 +151,11 @@ class PayPalPaymentProvider(BasePaymentProvider, ProcessLoggerMixin):
             if isinstance(order_dto.currency_code, str)
             else self.payment_method.channel.default_currency.iso3.upper()
         )
+        # The amount is net of the voucher, the breakdown parts are not. PayPal refuses a breakdown that does not
+        # add up to the amount, and discount is the one part it subtracts, so the voucher goes there.
+        discount = Decimal(str(cart_dto.cart.discount_amount or 0)) + Decimal(
+            str(cart_dto.cart.voucher_amount_applied or 0)
+        )
         return PayPalOrder(
             purchase_units=[
                 PurchaseUnits(
@@ -175,7 +180,7 @@ class PayPalPaymentProvider(BasePaymentProvider, ProcessLoggerMixin):
                             shipping_discount=UnitAmount(
                                 currency_code=currency, value=str(cart_dto.shipping_method.discount_amount)
                             ),
-                            discount=UnitAmount(currency_code=currency, value=str(cart_dto.cart.discount_amount)),
+                            discount=UnitAmount(currency_code=currency, value=str(discount)),
                             handling=UnitAmount(currency_code=currency, value=str(cart_dto.fee_price)),
                         ),
                     ),

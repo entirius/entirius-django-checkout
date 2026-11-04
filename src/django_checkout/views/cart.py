@@ -4,7 +4,6 @@
 
 from _decimal import Decimal
 from dataclasses import asdict
-from functools import reduce
 
 from django.views.decorators.csrf import csrf_exempt
 from django_utils.api.decorators import (
@@ -15,16 +14,17 @@ from django_utils.api.decorators import (
     require_http_method,
     save_ip_and_country,
 )
-from django_utils.api.exceptions import BadRequest, MethodNotAllowed, NotFound
+from django_utils.api.exceptions import MethodNotAllowed, NotFound
 from django_utils.api.responses import ErrorInfo, Response
 from django_utils.settings import HEADER_COUNTRY
 from process_logger import ProcessLogger
 
 from django_checkout import settings as checkout_settings
 from django_checkout.domain.cart import process_cart
-from django_checkout.domain.dto.cart import CartMerge, CartRequest, CartResponse, CheckoutData, ItemData
+from django_checkout.domain.dto.cart import CartMerge, CartRequest, CartResponse, CheckoutData
 from django_checkout.enums import CartStatus, PaymentProvider
 from django_checkout.models import Cart
+from django_checkout.services import cart_service
 from django_checkout.utils import redact_payment_secrets
 from django_checkout.utils.api.decorators import channel_view
 from django_checkout.utils.api.throttling import enforce_ip_rate_limit
@@ -207,7 +207,6 @@ def merge_cart(request, params: CartMerge, quest_cart_id, *args, **kwargs):
     customer = request.user.customer if (request.user is not None and request.user.is_customer) else None
     customer_record = Cart.objects.get_latest_by_customer(request)
     quest_record = Cart.objects.get_quest_record(request, quest_cart_id)
-    operation_success = False
     if customer_record is None:
         logger_process.info("There is no cart with this customer.", extra={})
         raise NotFound("No cart with this customer")
@@ -216,62 +215,42 @@ def merge_cart(request, params: CartMerge, quest_cart_id, *args, **kwargs):
         logger_process.info(f"There is no cart with this cart_id: {quest_cart_id}.", extra={})
         raise NotFound("wrong quest_cart_id")
 
-    checkout_data_quest = CheckoutData.Schema().load(quest_record.cart_body)
-    checkout_data_customer = CheckoutData.Schema().load(customer_record.cart_body)
-    items_customer = checkout_data_customer.cart.items
-    items_quest = checkout_data_quest.cart.items
-    items_customer_qty = [(each.sku, each.quantity) for each in items_customer]
-    items_quest_qty = [(each.sku, each.quantity) for each in items_quest]
-    body = CartRequest.factory()
-
-    if params.operation_type == "override":
-        items = items_quest_qty
-        unique_tuples = reduce(lambda res, tpl: dict(res, **{tpl[0]: res.get(tpl[0], 0) + tpl[1]}), items, {})
-        for each in unique_tuples.items():
-            item = ItemData(sku=each[0], quantity=each[1], offer_price=None, extra=None, sub_items=None)
-            body.cart.items.append(item)
-        operation_success = True
-    elif params.operation_type == "add":
-        items = items_customer_qty + items_quest_qty
-        unique_tuples = reduce(lambda res, tpl: dict(res, **{tpl[0]: res.get(tpl[0], 0) + tpl[1]}), items, {})
-        for each in unique_tuples.items():
-            item = ItemData(sku=each[0], quantity=each[1], offer_price=None, extra=None, sub_items=None)
-            body.cart.items.append(item)
-        operation_success = True
-    if operation_success:
-        processed_data, messages = process_cart(
-            request.channel, body, checkout_data_customer, customer=customer, geo_country=geo_country
+    try:
+        record, messages = cart_service.merge_carts(
+            request.channel,
+            str(customer_record.cart_id),
+            str(quest_record.cart_id),
+            operation=params.operation_type,
+            customer=customer,
+            geo_country=geo_country,
         )
-        record = customer_record.replace(processed_data)
-        quest_record.delete()
-        record.save()
-
-        response_body = CartResponse(
-            cart_id=customer_record.cart_id,
-            cart_status=customer_record.cart_status,
-            **redact_payment_secrets(customer_record.cart_body),
-            can_be_split=customer_record.is_egible_for_split,
-            free_shipping=customer_record.is_eglible_for_free_shipping,
-            amount_required_for_free_shipping=customer_record.amount_required_for_free_shipping,
-            amount_missing_for_free_shipping=customer_record.amount_missing_for_free_shipping,
-            amount_required_for_free_shipping_above_modifier=record.amount_required_for_free_shipping_above_modifier,
-            amount_missing_for_free_shipping_above_modifier=record.amount_missing_for_free_shipping_above_modifier,
-            min_order_price=Decimal(record.channel.min_order_price).quantize(Decimal("0.01")),
-            tax_rates=record.tax_rates,
-        )
-        regional = {
-            "language": response_body.language_code,
-            "currency": response_body.currency_code,
-            "country": response_body.country_code,
-        }
-        errors, messages = prepare_errors_and_messages(messages)
-        return (
-            Response(data=asdict(response_body), message="Cart modified successfully", messages=messages)
-            .add_regional(**regional)
-            .add_errors(errors)
-        )
-    else:
-        raise BadRequest(message="Operation failed")
+    except Cart.DoesNotExist:
+        logger_process.info(f"The cart {quest_cart_id} is not an open guest cart.", extra={})
+        raise NotFound("wrong quest_cart_id")
+    response_body = CartResponse(
+        cart_id=record.cart_id,
+        cart_status=record.cart_status,
+        **redact_payment_secrets(record.cart_body),
+        can_be_split=record.is_egible_for_split,
+        free_shipping=record.is_eglible_for_free_shipping,
+        amount_required_for_free_shipping=record.amount_required_for_free_shipping,
+        amount_missing_for_free_shipping=record.amount_missing_for_free_shipping,
+        amount_required_for_free_shipping_above_modifier=record.amount_required_for_free_shipping_above_modifier,
+        amount_missing_for_free_shipping_above_modifier=record.amount_missing_for_free_shipping_above_modifier,
+        min_order_price=Decimal(record.channel.min_order_price).quantize(Decimal("0.01")),
+        tax_rates=record.tax_rates,
+    )
+    regional = {
+        "language": response_body.language_code,
+        "currency": response_body.currency_code,
+        "country": response_body.country_code,
+    }
+    errors, messages = prepare_errors_and_messages(messages)
+    return (
+        Response(data=asdict(response_body), message="Cart modified successfully", messages=messages)
+        .add_regional(**regional)
+        .add_errors(errors)
+    )
 
 
 @csrf_exempt
