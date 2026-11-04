@@ -78,7 +78,7 @@ def validate_cart_data(
     ) -> tuple[list[ValidatedItemData], list[Any], Any, bool, bool, Any, Any]:
         msg_item = []
         item_sum_weight = 0
-        items_weight = {}
+        unit_weights = {}
         limited_sku_list = []
         items_are_too_heavy = False
         items_dont_have_weight = True
@@ -93,7 +93,10 @@ def validate_cart_data(
                     extra_key = json.dumps(item.extra, sort_keys=True)
                 except Exception:
                     extra_key = str(item.extra)
-            key = (item.sku, extra_key)
+            # A repeated request line collapses into its last occurrence. A gift is not a repeat of a bought
+            # line of the same SKU: the gratis pass appends it last, and without is_gratis in the key it
+            # replaced the bought line.
+            key = (item.sku, extra_key, bool(getattr(item, "is_gratis", False)))
             if key not in unique_keys:
                 unique_keys.add(key)
             else:
@@ -284,7 +287,7 @@ def validate_cart_data(
         products_available, allowed_guest_checkout = get_product_available(
             sku_list, shipping_option_method, payment_method, channel, customer
         )
-        item_sum_weight, items_dont_have_weight, items_weight = check_items_weight(items, channel)
+        item_sum_weight, items_dont_have_weight, unit_weights = check_items_weight(items, channel)
         items_are_too_heavy = check_cart_is_too_heavy(item_sum_weight, shipping_option_method)
         item_sum_volume, items_without_volume, items_volume = check_items_volume(items, channel)
         items_volume_exceeded = check_cart_volume_exceeded(item_sum_volume, shipping_option_method)
@@ -555,7 +558,9 @@ def validate_cart_data(
                     total_price=round(total_price, 2),
                     tax_rate=tax_rate,
                     sub_items=bundle_items.get(item.sku, None),
-                    total_weight=items_weight.get(item.sku, None),
+                    total_weight=(
+                        unit_weights[item.sku] * item.quantity if unit_weights.get(item.sku) is not None else None
+                    ),
                     unit_tax_amount=round(tax_amount, 2),
                     total_tax_amount=round(tax_amount * quantity, 2),
                     base_unit_tax_amount=round(tax_amount, 2),

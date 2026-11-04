@@ -2,9 +2,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-from itertools import groupby
-from operator import itemgetter
-
 from django_pim.models.product_bundle.bundle_link import BundleLink
 from django_pim.services.bundle_data import (
     get_bundle_limits,
@@ -27,16 +24,14 @@ _OPTIONAL_BUNDLE_LINK_FIELDS = {
 
 
 def get_grouped_data(bundle_links_data):
+    # The links query has no order, so rows of one bundle can come apart: group by key, not by adjacent rows.
     grouped_data = {}
-    for key, group in groupby(bundle_links_data, key=itemgetter("product_bundle__real_product__sku")):
-        subproduct_mapping = {
-            item["subproduct__real_product__sku"]: {
-                "quantity": item["quantity"],
-                **{field: item.get(field, default) for field, default in _OPTIONAL_BUNDLE_LINK_FIELDS.items()},
-            }
-            for item in group
+    for item in bundle_links_data:
+        subproducts = grouped_data.setdefault(item["product_bundle__real_product__sku"], {})
+        subproducts[item["subproduct__real_product__sku"]] = {
+            "quantity": item["quantity"],
+            **{field: item.get(field, default) for field, default in _OPTIONAL_BUNDLE_LINK_FIELDS.items()},
         }
-        grouped_data[key] = subproduct_mapping
     return grouped_data
 
 
