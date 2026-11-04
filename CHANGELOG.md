@@ -73,6 +73,13 @@
 
 ### Fixed
 
+- `cheapest_gratis` and `most_expensive_gratis` give their discount (client-visible: cart totals drop). The rule's
+  units of the chosen item (`extra_value`, at most what the cart holds) come at the gift price, as a picked gift does
+  (`GRATIS_PERCENT_DISCOUNT` down to `GRATIS_PRICE`, or `GRATIS_PRICE` under `GRATIS_MECHANISM = 2`), never above
+  the item's own price; a channel that discounts net prices gets the same gift price. The discount was computed and
+  then overwritten with the item's earlier discount, so the code came out valid at 0. The item is picked by price
+  among the bought lines: a gift line, always the cheapest at the gift price, is never picked, and a line with more
+  units no longer wins over a cheaper (or dearer) one; quantity only breaks a price tie.
 - Merging a guest cart into the customer's cart no longer fails, v1 (`carts/{id}/merge/`) and v2
   (`POST carts/{id}/merge/`). `CartRequest.factory()` left out five fields the request requires
   (`custom_order_id`, `requested_delivery_date`, `split_order`, `affiliate_code`, `customer_ip`), so every merge
