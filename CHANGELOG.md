@@ -18,6 +18,11 @@
 
 ### Fixed
 
+- A gift of a SKU the customer also buys is a line of its own: it no longer replaces the bought line (a bought mug
+  and the same mug picked as the gift came out as one mug at the gift price, `changed_price`). The gift is refused
+  when the bought units and the gift together exceed the saleable stock, and a gift above the stock is no longer
+  accepted on its own either. Cart weight and volume count the pieces of every line; each line's `total_weight` is
+  its own.
 - `import-discount-rules` (and the CSV import in the Django admin) no longer hangs. The mode-of-action loop of a
   row never ended once the row ran out of modes (`is_inclusion_or_exclusion_<n>` empty or missing), so the import
   never reached the row's codes or the next row; the admin import held the request until it timed out.
