@@ -2,6 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+import json
 
 import stripe
 from django.core.handlers.wsgi import WSGIRequest
@@ -67,7 +68,9 @@ def stripe_notify(request: WSGIRequest, channel_idx: str = None, *args, **kwargs
         return Response(data={"message": "For more information see log"}, status="FAIL", status_code=400)
 
     if event.type in ["checkout.session.completed", "checkout.session.expired"]:
-        stripe_checkout = event.data.object
+        # The session as plain JSON, from the body construct_event has just verified: since stripe 12 a
+        # StripeObject is no dict, and provider_notify (a JSONField) cannot store it.
+        stripe_checkout = json.loads(request.body)["data"]["object"]
 
         # Validation: do we have valid PaymentIntent object?
         stripe_order_id = stripe_checkout["id"]
