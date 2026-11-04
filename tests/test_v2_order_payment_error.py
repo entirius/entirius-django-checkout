@@ -6,10 +6,11 @@
 
 from unittest.mock import patch
 
+from django.urls import include, path
+from drf_spectacular.generators import SchemaGenerator
 from rest_framework.test import APIRequestFactory
 
 from django_checkout.api.v2.views.order_views import OrderCreateView
-from django_checkout.schemas.responses.order import OrderCreateResponse
 from django_checkout.services.order_service import OrderCreateResult
 
 factory = APIRequestFactory()
@@ -36,8 +37,14 @@ def test_a_paid_order_has_no_payment_error(channel, api_key):
     assert "payment_error" not in response.data
 
 
-def test_the_schema_lists_payment_error_as_optional():
-    schema = OrderCreateResponse.model_json_schema()
+def test_the_openapi_schema_lists_payment_error_as_an_optional_boolean():
+    patterns = [path("api/checkout/v2/<str:channel_idx>/", include("django_checkout.api.v2.urls"))]
+    schema = SchemaGenerator(patterns=patterns).get_schema(request=None, public=True)
+    created = schema["paths"]["/api/checkout/v2/{channel_idx}/orders/"]["post"]["responses"]["201"]
+    assert created["content"]["application/json"]["schema"] == {"$ref": "#/components/schemas/OrderCreateResponse"}
 
-    assert "payment_error" in schema["properties"]
-    assert "payment_error" not in schema.get("required", [])
+    model = schema["components"]["schemas"]["OrderCreateResponse"]
+
+    assert model["properties"]["payment_error"]["type"] == "boolean"
+    assert model["properties"]["payment_error"]["default"] is False
+    assert "payment_error" not in model.get("required", [])
