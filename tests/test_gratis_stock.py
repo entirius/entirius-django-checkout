@@ -12,9 +12,11 @@ own supplier is answered from their own shelves.
 """
 
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 
+from django_checkout.domain import cart_limiters
 from django_checkout.domain.dto.cart import CartData, CartRequest
 from django_checkout.domain.dto.discount import ValidatedDiscountData
 from django_checkout.domain.dto.item import ValidatedItemData
@@ -327,3 +329,110 @@ class TestTheCartFlowPassesTheCustomerDown:
         record = _claim_the_gift(channel)
 
         assert [item.sku for item in record.as_data.cart.items] == [TRIGGER_SKU]
+
+
+def _buy_a_mug_and_claim_another(channel, gift_quantity=1):
+    """Coffee and a bought mug in the cart, then a second mug claimed with the gratis code."""
+    record, _ = cart_service.create_cart(
+        channel=channel,
+        items=[{"sku": TRIGGER_SKU, "quantity": 1}, {"sku": GIFT_SKU, "quantity": 1}],
+        currency_code="EUR",
+        language_code="en",
+        country_code="PL",
+    )
+    record, _ = cart_service.patch_discounts(
+        channel=channel,
+        cart_id=str(record.cart_id),
+        codes=[{"code": "ENT-MUG", "sku": GIFT_SKU, "quantity": gift_quantity}],
+    )
+    return record
+
+
+def _lines(record):
+    return [(item.sku, int(item.quantity), item.is_gratis, item.status) for item in record.as_data.cart.items]
+
+
+class TestAGiftOfASkuTheCustomerBuys:
+    """The gift is a line of its own; the bought line of the same SKU stays and is paid for.
+
+    The gratis pass appends the gift to the items, and the item dedupe in validate_items keyed
+    lines by SKU alone, so the gift replaced the bought mug: one mug, at the gift price.
+    """
+
+    def test_the_bought_line_stays_next_to_the_gift(
+        self, channel, supplier, gratis_code, priced_catalog, coffee_in_stock
+    ):
+        _stock(channel, supplier, GIFT_SKU, quantity=5)
+
+        record = _buy_a_mug_and_claim_another(channel)
+
+        assert _lines(record) == [
+            (TRIGGER_SKU, 1, False, ItemStatus.VALID),
+            (GIFT_SKU, 1, False, ItemStatus.VALID),
+            (GIFT_SKU, 1, True, ItemStatus.VALID),
+        ]
+        bought, gift = record.as_data.cart.items[1:]
+        assert bought.total_price == Decimal("24.60")
+        assert record.as_data.cart.total_price == Decimal("123.00") + Decimal("24.60") + gift.total_price
+
+    def test_the_bought_line_survives_the_next_write(
+        self, channel, supplier, gratis_code, priced_catalog, coffee_in_stock
+    ):
+        _stock(channel, supplier, GIFT_SKU, quantity=5)
+        record = _buy_a_mug_and_claim_another(channel)
+
+        record = cart_service.refresh_cart_body(record)
+
+        assert [(sku, gratis) for sku, _, gratis, _ in _lines(record)] == [
+            (TRIGGER_SKU, False),
+            (GIFT_SKU, False),
+            (GIFT_SKU, True),
+        ]
+
+    def test_the_gift_is_refused_when_the_bought_mugs_take_the_whole_stock(
+        self, channel, supplier, gratis_code, priced_catalog, coffee_in_stock
+    ):
+        """One mug on the shelf, and the customer buys it: there is no second one to give."""
+        _stock(channel, supplier, GIFT_SKU, quantity=1)
+
+        record = _buy_a_mug_and_claim_another(channel)
+
+        assert _lines(record) == [
+            (TRIGGER_SKU, 1, False, ItemStatus.VALID),
+            (GIFT_SKU, 1, False, ItemStatus.VALID),
+        ]
+
+    def test_the_stock_check_counts_the_bought_units(self, channel, supplier, gratis_rule):
+        _stock(channel, supplier, GIFT_SKU, quantity=2)
+        cart_data = _cart_picking_the_gift()
+        cart_data.items.append(
+            ValidatedItemData.invalid_factory(sku=GIFT_SKU, status=ItemStatus.VALID, is_gratis=False, quantity=2)
+        )
+
+        gratis = calculate_and_valid_gratis(gratis_rule, cart_data, channel=channel, discount_idx=0)
+
+        assert gratis is None
+        assert cart_data.discounts[0].status == ItemStatus.INVALID
+
+
+class TestTheLimitsCountBothLines:
+    """Weight and volume take the pieces of a SKU over all its lines, bought and gift."""
+
+    def test_weight(self, channel, catalog):
+        real_product = catalog[GIFT_SKU].real_product
+        real_product.weight = 2
+        real_product.save()
+        lines = [SimpleNamespace(sku=GIFT_SKU, quantity=1), SimpleNamespace(sku=GIFT_SKU, quantity=3)]
+
+        total, _, by_sku = cart_limiters.check_items_weight(lines, channel)
+
+        assert total == 8
+        assert by_sku == {GIFT_SKU: 8}
+
+    def test_volume(self, monkeypatch):
+        monkeypatch.setattr(cart_limiters, "get_volumes_by_sku", lambda channel_idx, skus: {GIFT_SKU: 2})
+        lines = [SimpleNamespace(sku=GIFT_SKU, quantity=1), SimpleNamespace(sku=GIFT_SKU, quantity=3)]
+
+        total, missing, by_sku = cart_limiters.check_items_volume(lines, SimpleNamespace(idx="novatrade"))
+
+        assert (total, missing, by_sku) == (8, False, {GIFT_SKU: 8})

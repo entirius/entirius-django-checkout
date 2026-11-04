@@ -12,7 +12,7 @@ from django_checkout.domain.dto.cart import CartData
 from django_checkout.domain.dto.discount import DiscountData, GratisRules
 from django_checkout.domain.dto.discount_items import DiscountItems
 from django_checkout.domain.dto.item import GratisData, ValidatedItemData
-from django_checkout.domain.quantities import filter_saleable_skus
+from django_checkout.domain.quantities import fetch_quantities, filter_saleable_skus
 from django_checkout.domain.validators.discounts import validate_discounts
 from django_checkout.enums import ItemStatus
 from django_checkout.models import (
@@ -956,6 +956,23 @@ def calculate_discounts_modifiers(
     return cart_data
 
 
+def gift_fits_the_stock(cart_data, sku, quantity, channel, customer=None) -> bool:
+    """The gift and the bought units of its SKU fit the saleable stock together.
+
+    A gift of a SKU the customer also buys is a line of its own, and validate_items checks each line
+    against the stock alone, so the sum is checked here.
+    """
+    stock = fetch_quantities([sku], channel, customer).get(sku, {})
+    if not stock.get("is_saleable"):
+        return False
+    bought = sum(
+        Decimal(item.quantity or 0)
+        for item in getattr(cart_data, "items", None) or []
+        if item.sku == sku and not getattr(item, "is_gratis", False)
+    )
+    return bought + Decimal(quantity or 0) <= stock.get("saleable_quantity", 0)
+
+
 def calculate_and_valid_gratis(
     discount: DiscountRuleCode, cart_data: CartData, channel=None, discount_idx=0, currency_code=None, customer=None
 ):
@@ -1002,7 +1019,7 @@ def calculate_and_valid_gratis(
     skus_allowed_to_gratis = products_allowed_to_gratis.values_list("real_product__sku", flat=True)
     picked_sku = cart_data.discounts[discount_idx].sku
     picked_quantity = cart_data.discounts[discount_idx].quantity
-    if picked_sku and not filter_saleable_skus([picked_sku], channel, customer):
+    if picked_sku and not gift_fits_the_stock(cart_data, picked_sku, picked_quantity, channel, customer):
         cart_data.discounts[discount_idx].status = ItemStatus.INVALID
         return None
     if discount.modifier == ModifiersForDiscountRule.GRATIS_BY_SKU_IN_CART:

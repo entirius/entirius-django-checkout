@@ -93,7 +93,10 @@ def validate_cart_data(
                     extra_key = json.dumps(item.extra, sort_keys=True)
                 except Exception:
                     extra_key = str(item.extra)
-            key = (item.sku, extra_key)
+            # A repeated request line collapses into its last occurrence. A gift is not a repeat of a bought
+            # line of the same SKU: the gratis pass appends it last, and without is_gratis in the key it
+            # replaced the bought line.
+            key = (item.sku, extra_key, bool(getattr(item, "is_gratis", False)))
             if key not in unique_keys:
                 unique_keys.add(key)
             else:

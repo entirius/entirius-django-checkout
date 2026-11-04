@@ -31,12 +31,20 @@ def get_product_available(
     return products_available, allowed_guest_checkout
 
 
+def _quantities_by_sku(items: list[SkuQuantityData]) -> dict:
+    """Pieces per SKU over every line: a gift is a line of its own next to a bought line of the same SKU."""
+    quantities = {}
+    for item in items:
+        quantities[item.sku] = quantities.get(item.sku, 0) + item.quantity
+    return quantities
+
+
 def check_items_weight(items: list[SkuQuantityData], channel: "Channel"):
     sku_list = [elem.sku for elem in items]
     data = Product.objects.filter(shop__idx=channel.idx, real_product__sku__in=sku_list).values(
         "real_product__sku", "real_product__weight"
     )
-    quantities = {item.sku: item.quantity for item in items}
+    quantities = _quantities_by_sku(items)
     result = [
         {
             "real_product__sku": item["real_product__sku"],
@@ -78,14 +86,14 @@ def check_items_volume(items: list[SkuQuantityData], channel: "Channel"):
     if get_volumes_by_sku is None:
         return 0, False, {}
 
-    sku_list = [elem.sku for elem in items]
+    sku_list = list(dict.fromkeys(elem.sku for elem in items))
     try:
         volumes_by_sku = get_volumes_by_sku(channel.idx, sku_list)
     except Exception:
         logger.warning("Failed to fetch product volumes from PIM, skipping volume check")
         return 0, False, {}
 
-    quantities = {item.sku: item.quantity for item in items}
+    quantities = _quantities_by_sku(items)
 
     item_sum_volume = 0
     items_volume = {}
