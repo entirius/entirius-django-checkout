@@ -16,10 +16,15 @@ def is_voucher_method(method) -> bool:
     return PaymentProvider.is_voucher(getattr(method, "provider", None), getattr(method, "code", None))
 
 
+def _first_settling(rows, is_voucher):
+    """The first row that is no voucher, else the first (vouchers alone); None entries are skipped."""
+    present = [row for row in rows or [] if row is not None]
+    return next((row for row in present if not is_voucher(row)), present[0] if present else None)
+
+
 def settling_payment_method(methods):
     """The method that settles what the vouchers leave: the first that is no voucher, else the first."""
-    present = [method for method in methods or [] if method is not None]
-    return next((method for method in present if not is_voucher_method(method)), present[0] if present else None)
+    return _first_settling(methods, is_voucher_method)
 
 
 def is_voucher_intent(intent) -> bool:
@@ -32,8 +37,7 @@ def settling_payment_intent(intents):
 
     ``Order.create`` makes no gateway intent when the vouchers cover the order, so the voucher's is the one left.
     """
-    present = list(intents)
-    return next((intent for intent in present if not is_voucher_intent(intent)), present[0] if present else None)
+    return _first_settling(intents, is_voucher_intent)
 
 
 def covered_by_vouchers(voucher_paid, amount_due) -> bool:
