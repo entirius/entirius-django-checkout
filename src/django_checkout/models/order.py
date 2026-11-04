@@ -235,6 +235,14 @@ class Order(models.Model):
                 voucher_applied = Decimal(str(getattr(data.cart, "voucher_amount_applied", None) or 0))
                 remaining_to_pay = Decimal(str(getattr(data, "total", None) or 0))
                 fully_voucher_covered = voucher_applied > 0 and remaining_to_pay <= 0
+                from django_checkout.domain.validators.payment import free_order_with_amount_due
+
+                if free_order_with_amount_due([cart.selected_payment_method], remaining_to_pay):
+                    # The cart validation already refuses this; the order must not rely on it alone,
+                    # since the methods are resolved from the stored cart body by code.
+                    raise Exception(
+                        f"Unable to create order for cart {cart.cart_id}: free order with {remaining_to_pay} to pay"
+                    )
                 if is_cash_on_delivery or is_free_order:
                     order_status = OrderStatus.CONFIRMED
                 else:

@@ -15,7 +15,7 @@ from marshmallow import EXCLUDE
 from django_checkout.domain.dto.cart import CheckoutData
 from django_checkout.domain.dto.item import SkuQuantityData
 from django_checkout.domain.shipping import get_delivery_matrix_prices
-from django_checkout.enums import CartStatus, ItemStatus
+from django_checkout.enums import CartStatus, ItemStatus, PaymentProvider
 from django_checkout.models.payment_method import PaymentMethod
 from django_checkout.models.shipping_option import ShippingOption
 from django_checkout.utils import anonymize_addresses_in_body, sanitize, scrub_payment_secrets_in_body
@@ -357,12 +357,16 @@ class Cart(models.Model):
             self.selected_shipping_method is not None and self.selected_shipping_method.cash_on_delivery_available
         )
 
-        return (
+        available = (
             result.filter_by_cash_on_delivery(cash_on_delivery_available, self.selected_shipping_method)
             .get_only_pm_available_for_cart_products(self.item_data_list, self.channel, is_logged)
             .get_only_not_limited_pm([item.sku for item in self.item_data_list], self.channel, is_logged)
             .get_only_by_customer_group(group)
         )
+        if Decimal(str(data.total or 0)) > 0:
+            # free_order settles nothing: only a cart with nothing left to pay may offer it.
+            available = available.exclude(provider=PaymentProvider.FREE_ORDER)
+        return available
 
     @property
     def is_egible_for_split(self):

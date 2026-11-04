@@ -389,8 +389,8 @@ No `processed_` prefix, no flattening needed. Clean nested response.
   "currency": "EUR",                                    // was currency_code — aligned with Matrix
 
   // ── Cart totals ─────────────────────────────────────
-  "subtotal_gross": "399.98",                            // was base_total
-  "subtotal_net": "325.19",                              // new
+  "subtotal_gross": "499.98",                            // was base_total: valid items at catalogue price
+  "subtotal_net": "406.49",                              // new: their catalogue net
   "total_gross": "419.97",                               // was total (incl shipping)
   "total_net": "341.44",                                 // new
   "total_tax": "78.53",                                  // unchanged
