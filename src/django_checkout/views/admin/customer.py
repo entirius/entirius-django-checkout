@@ -23,9 +23,9 @@ logger = ProcessLogger("CHECKOUT_ADMIN_VIEW", module="django_checkout")
 @require_http_method("DELETE")
 def admin_customer_delete(request: WSGIRequest, *args, **kwargs):
     """
-    Endpoint to delete a customer email from order.
+    Endpoint to erase a customer's data from their orders and carts.
     Only the authenticated admin can delete the customer data.
-    Firstname and lastname will be anonymized.
+    Every personal field checkout keeps is anonymized (docs/api/checkout.md, "Customer erasure").
     """
 
     try:
