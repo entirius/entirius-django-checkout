@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Client-visible: an order whose shipping method delivers to a pickup point (`method_type` `inpost` or
+  `pickup_point`) and whose cart names no point is refused: v2 `POST orders/` answers 409 `DELIVERY_POINT_NOT_SELECTED`
+  (v1 answers 403 with the same status), and nothing is ordered. Such an order was created without a point, so
+  nobody knew where to send the parcel. A storefront sends the point with `PATCH carts/{id}/shipping/`
+  (`delivery_point`); methods of the other types do not change.
+
 ## 10.1.1 — 2026-11-04
 
 ### Security

@@ -45,7 +45,9 @@ class OrderCreateView(CheckoutChannelMixin, APIView):
                 description=(
                     "The cart cannot become an order yet, or a discount code it applied can no longer be used; "
                     "nothing is ordered. `error` is the reason: `ADDRESSES_NOT_SELECTED`, `SHIPPING_OPTION_NOT_SELECTED`, "
-                    "`PAYMENT_OPTION_NOT_SELECTED`, `OUT_OF_STOCK`, `VOUCHER_NOT_SUPPORTED_ON_SPLIT_ORDER` (a voucher on "
+                    "`PAYMENT_OPTION_NOT_SELECTED`, `DELIVERY_POINT_NOT_SELECTED` (a method of type `inpost` or "
+                    "`pickup_point` and no `delivery_point` in the cart), `OUT_OF_STOCK`, "
+                    "`VOUCHER_NOT_SUPPORTED_ON_SPLIT_ORDER` (a voucher on "
                     "a cart that splits into several orders), or a `DISCOUNT_*` code as in the cart's `_errors` "
                     "(`DISCOUNT_USAGE_LIMIT_REACHED`, `DISCOUNT_PER_USER_LIMIT_REACHED`, `DISCOUNT_EXPIRED`, ...)."
                 )
