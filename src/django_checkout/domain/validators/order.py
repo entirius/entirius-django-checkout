@@ -6,10 +6,31 @@ from django_utils.api.exceptions import Forbidden
 from django_utils.api.responses import ErrorInfo
 
 VOUCHER_ON_SPLIT_ORDER = "voucher_not_supported_on_split_order"
+# Shipping method types that deliver to a pickup point (django_deliverypoints), not to the shipping address.
+POINT_METHOD_TYPES = ("inpost", "pickup_point")
 
 
 class CartNotReady(Forbidden):
-    """The cart cannot become an order yet: no addresses, shipping or payment method, or an item out of stock."""
+    """The cart cannot become an order yet: no addresses, shipping or payment method, no pickup point for a method that
+    needs one, or an item out of stock."""
+
+
+def lacks_delivery_point(cart_id, shipping) -> bool:
+    """The cart's shipping method delivers to a pickup point (``POINT_METHOD_TYPES``) and the cart names none.
+
+    The cart data carries the method's code, not its type, so the type comes from the method of the cart's channel.
+    """
+    code = getattr(shipping, "code", None)
+    if not code or (getattr(shipping, "delivery_point", None) or {}).get("code"):
+        return False
+    # Imported here: the models import the domain package, which imports this module.
+    from django_checkout.models import Cart, ShippingMethod
+
+    return ShippingMethod.objects.filter(
+        code=code,
+        channel__in=Cart.objects.filter(cart_id=cart_id).values("channel"),
+        method_type__in=POINT_METHOD_TYPES,
+    ).exists()
 
 
 def voucher_on_split_order_error(split_parts: int) -> ErrorInfo:
@@ -65,6 +86,10 @@ class OrderValidation:
             flag = True
             status = "SHIPPING_OPTION_NOT_SELECTED"
             message = f"There is no shipping method in this cart {cart}"
+        elif lacks_delivery_point(cart, processed_data.shipping_method):
+            flag = True
+            status = "DELIVERY_POINT_NOT_SELECTED"
+            message = f"The shipping method of this cart {cart} delivers to a pickup point and none is selected"
 
         if processed_data.addresses is None:
             flag = True
