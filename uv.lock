@@ -780,6 +780,9 @@ dev = [
     { name = "pre-commit" },
     { name = "ruff" },
 ]
+email = [
+    { name = "entirius-django-email" },
+]
 qms = [
     { name = "entirius-django-qms" },
 ]
@@ -789,6 +792,7 @@ returns = [
 test = [
     { name = "dj-database-url" },
     { name = "entirius-django-captcha" },
+    { name = "entirius-django-email" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pytest" },
     { name = "pytest-django" },
@@ -810,6 +814,8 @@ requires-dist = [
     { name = "drf-spectacular", specifier = ">=0.27" },
     { name = "entirius-django-accounts", specifier = ">=5.0.0" },
     { name = "entirius-django-captcha", marker = "extra == 'test'", specifier = ">=2.0.0" },
+    { name = "entirius-django-email", marker = "extra == 'email'", specifier = ">=4.3.0" },
+    { name = "entirius-django-email", marker = "extra == 'test'", specifier = ">=4.3.0" },
     { name = "entirius-django-pim", specifier = ">=3.1.0" },
     { name = "entirius-django-pricemanager", specifier = ">=4.1.0" },
     { name = "entirius-django-qms", marker = "extra == 'qms'", specifier = ">=4.0.0" },
@@ -838,11 +844,11 @@ requires-dist = [
     { name = "stripe", specifier = ">=11.6.0" },
     { name = "tqdm" },
 ]
-provides-extras = ["dev", "test", "qms", "vault", "returns"]
+provides-extras = ["dev", "test", "qms", "vault", "email", "returns"]
 
 [[package]]
 name = "entirius-django-email"
-version = "4.0.0"
+version = "4.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "django", version = "5.2.18", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -855,9 +861,9 @@ dependencies = [
     { name = "entirius-py-process-logger" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f2/a0/3080136a3f2d6beba804b492b7d8c62ee413d8c17a3bdba1c0cde9e1e0c5/entirius_django_email-4.0.0.tar.gz", hash = "sha256:5d447c9fab23c4a8dd71b38107ba6b6cf7b3e5e4d6d9ad1aaff393714ecd7e11", size = 112421, upload-time = "2026-07-10T19:06:49.265Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c3/ef/b90cb79d18b6b36e812546aeaba21bf75c4d0ef98b893b12f1cdf7d17e93/entirius_django_email-4.3.0.tar.gz", hash = "sha256:1c8390ec07c14bc8d651c037c7addbd15aaa796a390c3a16961cf7829d625e13", size = 133254, upload-time = "2026-10-27T10:51:24.517Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/23/38/ebf94fcd3aef3136c3016de1c1e10eb622fb5a5902baf508d429c7e8691d/entirius_django_email-4.0.0-py3-none-any.whl", hash = "sha256:36e744f5a61a1c4ba8ca09af63550b93c1e8c1293b7ccf0fa6587c0c7760ea46", size = 126736, upload-time = "2026-07-10T19:06:48.152Z" },
+    { url = "https://files.pythonhosted.org/packages/53/ef/1d883a60a71e1952f80fae2bbc24761ed9da853a7af7e3e78ff5d9315d97/entirius_django_email-4.3.0-py3-none-any.whl", hash = "sha256:a9245f1ef91f50542dc8342ea2f1d41c40936d344230c1e494d1502edaaabf02", size = 135216, upload-time = "2026-10-27T10:51:22.948Z" },
 ]
 
 [[package]]

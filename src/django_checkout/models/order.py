@@ -2,6 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+import logging
 import uuid
 from dataclasses import asdict
 from decimal import Decimal
@@ -72,6 +73,26 @@ def _is_number_collision(error: IntegrityError) -> bool:
     return getattr(getattr(error.__cause__, "diag", None), "constraint_name", None) == ORDER_NUMBER_CONSTRAINT
 
 
+def _order_mail():
+    """The order e-mail service, imported late: it imports this module."""
+    from django_checkout.services import order_mail
+
+    return order_mail
+
+
+def _schedule_confirmation_unless_split_part(order: "Order", cart: "Cart") -> None:
+    """A part of a split purchase is scheduled once by the split worker, after every part exists."""
+    from django_checkout.models.splited_order_link import SplitOrderLink
+
+    try:
+        is_split_part = SplitOrderLink.objects.filter(split_cart=cart).exists()
+    except Exception:
+        logging.getLogger("process").exception("order mail: hook failed for order %s", order.pk)
+        return
+    if not is_split_part:
+        _order_mail().schedule_confirmation_after_commit(order.pk)
+
+
 class Order(models.Model):
     objects = OrderManager()
     channel: "Channel" = models.ForeignKey("Channel", null=True, on_delete=models.SET_NULL)
@@ -112,11 +133,13 @@ class Order(models.Model):
     def save(self, change_status_only_in_split_order=True, *args, **kwargs):
         is_status_changed_to_confirmed = False
         is_status_changed_to_canceled = False
+        previous_status = None
 
         # If Order is being created the default argument does the job
         # If Order exists already, check if status changed
         if self.pk is not None:
             current = Order.objects.get(pk=self.pk)
+            previous_status = current.order_status
             self.in_status_since = (
                 timezone.now() if (current.order_status != self.order_status) else self.in_status_since
             )
@@ -148,8 +171,10 @@ class Order(models.Model):
 
         if is_status_changed_to_confirmed:
             order_confirmed_signal.send(sender=Order.__class__, order_id=self.order_id)
+            _order_mail().schedule_confirmation_after_commit(self.pk)
         if is_status_changed_to_canceled:
             order_canceled_signal.send(sender=Order.__class__, order_id=self.order_id)
+            _order_mail().schedule_canceled_after_commit(self.pk, previous_status in _order_mail().PAID_STATUSES)
 
     def _insert_with_next_number(self, *args, **kwargs):
         """Insert the order under the next free `in_channel_id`, retrying when a concurrent order took it.
@@ -465,6 +490,7 @@ class Order(models.Model):
                 if process_payment and fully_voucher_covered and payment_error is None:
                     order.modify_status(OrderStatus.CONFIRMED)
 
+                _schedule_confirmation_unless_split_part(order, cart)
                 return order, redirect_url, payment_error
 
     def modify_status(self, status):
@@ -518,6 +544,7 @@ class Order(models.Model):
         """
         with transaction.atomic():
             changed = [self._anonymize_own_fields(), self._anonymize_used_coupons(), self._redact_payment_redirects()]
+            changed.append(self._blank_mail_recipients())
             changed += [intent.anonymize() for intent in self.payment_items.all()]
         return any(changed)
 
@@ -538,6 +565,10 @@ class Order(models.Model):
     def _redact_payment_redirects(self) -> bool:
         """A redirect's target is the body's ``continue_url``, which the body scrub redacts: redact the copy too."""
         return self.payment_redirects.exclude(target_url=REDACTED).update(target_url=REDACTED) > 0
+
+    def _blank_mail_recipients(self) -> bool:
+        """The address each order e-mail was sent to, and the last error, which may quote it."""
+        return self.mails.exclude(recipient="", last_error="").update(recipient="", last_error="") > 0
 
     def _anonymize_used_coupons(self) -> bool:
         """The e-mails a used code stores: the address e-mails or, for a logged-in customer, the account one."""

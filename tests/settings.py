@@ -46,6 +46,9 @@ INSTALLED_APPS = [
     "django_pricemanager",
     "django_checkout",
 ]
+# Soft integration (extra `email`): the order e-mail tests skip without it.
+if find_spec("django_email"):
+    INSTALLED_APPS.append("django_email")
 # Soft dependency: with django-access importable (zeno) keys are checked as access tokens;
 # ENTIRIUS_TEST_NO_ACCESS=1 (make test-legacy) runs the legacy key path.
 if find_spec("django_access") and not os.environ.get("ENTIRIUS_TEST_NO_ACCESS"):
