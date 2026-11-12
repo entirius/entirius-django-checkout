@@ -98,7 +98,7 @@ sub-resource PATCH pattern).
 
 Soft integrations (optional extras, lazy imports with graceful fallback): `qms` (stock sync command reads QMS
 sources), `vault` (card-on-file storage for PayU card payments), `returns` (returnable-orders lookup in
-`views/order.py`).
+`views/order.py`), `email` (order confirmation and cancellation e-mails: `OrderMail`, `worker/order_mail_tasks.py`).
 
 | Topic | Where |
 |---|---|
@@ -171,3 +171,9 @@ toggles and defaults: `docs/configuration.md`.
   `import-discount-rules`) calls `refuse_clash` / `refuse_scope_change`; a new one must too. No DB constraint
   (channels and currencies are M2M): stored clashes keep working and the `checkout.discount_codes` check
   (`entirius_config`, shown by munin) lists them.
+- Order e-mails have exactly four hooks: `Order.create` (skipped for a part of a split purchase),
+  `split_orders_by_attribute` (once, after every part exists) and the `confirmed` / `canceled` transitions in
+  `Order.save`. Each only registers an after-commit callback (`services/order_mail.py`) that reloads the order and
+  never raises into the order flow; the unique (order, kind) row of `OrderMail` is the only guard against a second
+  e-mail — do not add another. `order_created_signal` is not used: a falsy receiver aborts `Order.create`. Tests run
+  the callbacks with `django_capture_on_commit_callbacks(execute=True)`.
