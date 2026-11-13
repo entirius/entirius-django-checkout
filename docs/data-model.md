@@ -13,6 +13,7 @@
 | DiscountCode | code, max_used, active_from/to | -> DiscountRuleCode |
 | Stock | quantity, saleable_quantity_limit | -> ProductRepresentation, -> Supplier |
 | ProductRepresentation | sku (unique per channel) | -> Channel |
+| OrderMail | kind (confirmation, canceled), status, recipient, language, attempts, last_error, sent_at; unique (order, kind) | -> Order (`mails`), -> User (`requested_by`) |
 
 Cross-app FK/M2M: `django_accounts` (Customer, Group), `django_pim` (Product, Attribute, Feature,
 ProductCategory), `django_regional` (Country, Currency, Language).

@@ -23,6 +23,7 @@ from django_checkout.domain.validators.order import OrderValidation
 from django_checkout.enums import CartStatus, SplitOrderPaymentFeeMechanism, SplitOrderShippingCostMechanism
 from django_checkout.models import Cart, Channel, Order, SplitOrderMechanism
 from django_checkout.models.splited_order_link import SplitOrderLink
+from django_checkout.services.order_mail import schedule_confirmation_after_commit
 
 logger_process = ProcessLogger("SPLIT_ORDER")
 
@@ -300,6 +301,9 @@ def split_orders_by_attribute(
                 is_first_order_iteration=False,
             )
 
+    if first_order:
+        # Once for the whole purchase, now that every part exists: the e-mail lists all of them.
+        schedule_confirmation_after_commit(first_order[0].pk)
     logger_process.add_log_param("split_orders_id", split_orders_pretty_id)
     logger_process.info("Order was successfully split")
     return split_orders_pretty_id, first_order

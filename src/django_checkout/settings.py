@@ -150,3 +150,7 @@ PAYMENT_REDIRECT_ALLOWED_HOSTS = getattr(settings, "PAYMENT_REDIRECT_ALLOWED_HOS
 # regular cart operations are not throttled.
 PAY_CODE_RATE_LIMIT = int(getattr(settings, "PAY_CODE_RATE_LIMIT", 30))
 PAY_CODE_RATE_WINDOW_SECONDS = int(getattr(settings, "PAY_CODE_RATE_WINDOW_SECONDS", 60))
+
+# ORDER E-MAILS (extra `email`): no beat, every send is triggered by an order transition.
+CHECKOUT_ORDER_CONFIRMATION_EMAIL = getattr(settings, "CHECKOUT_ORDER_CONFIRMATION_EMAIL", True)
+CHECKOUT_ORDER_CANCELED_EMAIL = getattr(settings, "CHECKOUT_ORDER_CANCELED_EMAIL", True)
