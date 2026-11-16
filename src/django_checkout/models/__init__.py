@@ -19,6 +19,7 @@ from django_checkout.models.limited_products import LimitedProducts
 from django_checkout.models.linked_products import LinkedProducts
 from django_checkout.models.order import Order
 from django_checkout.models.order_attachment import OrderAttachment
+from django_checkout.models.order_mail import OrderMail
 from django_checkout.models.order_status_label import OrderStatusLabel
 from django_checkout.models.payment_intent import PaymentIntent
 from django_checkout.models.payment_method import PaymentMethod

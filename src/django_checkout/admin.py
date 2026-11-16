@@ -33,6 +33,7 @@ from django_checkout.models import (
     LinkedProducts,
     Order,
     OrderAttachment,
+    OrderMail,
     OrderStatusLabel,
     PaymentIntent,
     PaymentMethod,
@@ -212,6 +213,25 @@ class OrderSplitInline(TabularInlinePaginated):
     extra = 0
     ordering = ("-updated",)
     autocomplete_fields = ["original_order", "original_cart", "split_cart", "split_order"]
+
+
+@admin.register(OrderMail)
+class OrderMailAdmin(admin.ModelAdmin):
+    """The e-mail log of the orders: read only, a resend goes through the admin API."""
+
+    list_display = ["order", "kind", "status", "attempts", "sent_at", "created"]
+    list_filter = ["status", "kind"]
+    list_select_related = ["order"]
+    readonly_fields = [field.name for field in OrderMail._meta.fields]
+
+    def has_add_permission(self, request) -> bool:
+        return False
+
+    def has_change_permission(self, request, obj=None) -> bool:
+        return False
+
+    def has_delete_permission(self, request, obj=None) -> bool:
+        return False
 
 
 @admin.register(Order)

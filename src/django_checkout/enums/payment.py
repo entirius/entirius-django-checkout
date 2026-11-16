@@ -64,3 +64,18 @@ class PaymentProvider(TextChoices):
             # VoucherPaymentProvider against the Voucher table.
             return bool(code) and bool(re.fullmatch(r"[A-Za-z0-9_\-:,]+", code))
         return True
+
+
+# Providers that settle online through a payment gateway: their orders are confirmed by a payment notification.
+ONLINE_GATEWAY_PROVIDERS = frozenset(
+    {
+        PaymentProvider.PAYU,
+        PaymentProvider.PAYU_CARD,
+        PaymentProvider.PAYU_BLIK,
+        PaymentProvider.PAYPAL,
+        PaymentProvider.PAYNOW,
+        PaymentProvider.PRZELEWY24,
+        PaymentProvider.AUTOPAY,
+        PaymentProvider.STRIPE,
+    }
+)

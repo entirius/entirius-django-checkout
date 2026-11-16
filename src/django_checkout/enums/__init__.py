@@ -7,6 +7,8 @@ from .enums import (
     FeeType,
     ItemStatus,
     LineType,
+    OrderMailKind,
+    OrderMailStatus,
     OrderStatus,
     PaymentIntentStatus,
     PriceType,
@@ -14,4 +16,4 @@ from .enums import (
     SplitOrderShippingCostMechanism,
     ValidationStatus,
 )
-from .payment import PaymentProvider
+from .payment import ONLINE_GATEWAY_PROVIDERS, PaymentProvider

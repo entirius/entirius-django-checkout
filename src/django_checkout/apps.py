@@ -42,3 +42,4 @@ class DjangoCheckoutConfig(AppConfig):
 
     def ready(self):
         from django_checkout import checks  # noqa: F401 — registers the system checks
+        from django_checkout.worker import order_mail_tasks  # noqa: F401 — registers the Celery task

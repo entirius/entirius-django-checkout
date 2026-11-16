@@ -26,6 +26,7 @@ from django_checkout.api.v2.views.admin.order_views import (
     AdminOrderCancelView,
     AdminOrderDetailView,
     AdminOrderListView,
+    AdminOrderMailResendView,
     AdminOrderStatusView,
 )
 
@@ -34,6 +35,11 @@ urlpatterns = [
     path("orders/<str:uid>/", AdminOrderDetailView.as_view(), name="checkout-v2-admin-orders-detail"),
     path("orders/<str:uid>/status/", AdminOrderStatusView.as_view(), name="checkout-v2-admin-orders-status"),
     path("orders/<str:uid>/cancel/", AdminOrderCancelView.as_view(), name="checkout-v2-admin-orders-cancel"),
+    path(
+        "orders/<str:uid>/mails/<str:kind>/resend/",
+        AdminOrderMailResendView.as_view(),
+        name="checkout-v2-admin-orders-mail-resend",
+    ),
     path(
         "orders/<str:uid>/attachments/", AdminOrderAttachmentView.as_view(), name="checkout-v2-admin-orders-attachments"
     ),

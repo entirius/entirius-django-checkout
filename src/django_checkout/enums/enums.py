@@ -142,3 +142,17 @@ class SplitOrderPaymentFeeMechanism(TextChoices):
             "Divides the payment fee equally among all orders. Any potential rounding discrepancies will be added to the first one in the sequence."
         ),
     )
+
+
+@unique
+class OrderMailKind(TextChoices):
+    CONFIRMATION = "confirmation", _("Order confirmation")
+    CANCELED = "canceled", _("Order canceled")
+
+
+@unique
+class OrderMailStatus(TextChoices):
+    PENDING = "pending", _("Pending")
+    SENT = "sent", _("Sent")
+    FAILED = "failed", _("Failed")
+    SKIPPED = "skipped", _("Skipped")

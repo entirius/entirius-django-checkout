@@ -91,3 +91,17 @@ class OrderListResponse(BaseModel):
     next: str | None = Field(None, description="Next page URL")
     previous: str | None = Field(None, description="Previous page URL")
     results: list[OrderListItemResponse] = Field(default_factory=list)
+
+
+class OrderMailResponse(BaseModel):
+    """One order e-mail of the log (``OrderMail``)."""
+
+    kind: str = Field(description="E-mail kind", examples=["confirmation", "canceled"])
+    status: str = Field(description="pending, sent, failed or skipped", examples=["sent"])
+    recipient: str = Field(description="Address it was sent to; blank until the first send or after erasure")
+    language: str = Field(description="Language of the e-mail (ISO 639-1)", examples=["en"])
+    attempts: int = Field(description="Send attempts, resends included")
+    last_error: str = Field(description="Exception class and a short message of the last failed attempt")
+    sent_at: datetime | None = Field(None, description="When it was last sent")
+    created: datetime = Field(description="When it was first scheduled")
+    order_numbers: list[str] = Field(description="Every order the e-mail covers (all parts of a split purchase)")

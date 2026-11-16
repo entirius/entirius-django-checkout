@@ -18,10 +18,12 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from django_checkout.api.v2.mixins import CheckoutChannelMixin
 from django_checkout.api.v2.pagination import AdminPageNumberPagination
-from django_checkout.enums import OrderStatus
+from django_checkout.api.v2.throttling import OrderMailResendThrottle
+from django_checkout.enums import OrderMailKind, OrderStatus
 from django_checkout.models import Order, OrderAttachment, OrderStatusLabel, StockReservation
 from django_checkout.schemas.common import format_money
-from django_checkout.schemas.responses.order import AdminOrderListItemResponse
+from django_checkout.schemas.responses.order import AdminOrderListItemResponse, OrderMailResponse
+from django_checkout.services import order_mail
 from django_checkout.services.order_service import order_lookup_q
 from django_checkout.utils import redact_payment_secrets
 
@@ -120,6 +122,7 @@ class AdminOrderDetailView(CheckoutChannelMixin, APIView):
                 ],
                 "attachments": [{"file_id": a.pk, "name": a.name} for a in order.orderattachment_set.all()],
                 "extra": order.extra,
+                "mails": [row.model_dump(mode="json") for row in order_mail.mail_rows(order)],
             }
         )
 
@@ -187,6 +190,37 @@ class AdminOrderCancelView(CheckoutChannelMixin, APIView):
         return Response(
             {"order_id": str(order.order_id), "pretty_id": order.pretty_id or "", "status": order.order_status}
         )
+
+
+class AdminOrderMailResendView(CheckoutChannelMixin, APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAdminUser]
+    access_area = "checkout.orders"
+    throttle_classes = [OrderMailResendThrottle]
+
+    @extend_schema(
+        summary="Resend an order e-mail",
+        description="Puts the order's confirmation or cancellation e-mail back in the send queue. A confirmation "
+        "of a split purchase is resent for the whole purchase; a cancellation only if one was sent before.",
+        tags=["Checkout Admin"],
+        request=None,
+        responses={202: OrderMailResponse},
+    )
+    def post(self, request, channel_idx, uid, kind, **kwargs):
+        if kind not in OrderMailKind.values:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        try:
+            order = _get_order(self.get_channel(), uid)
+        except Order.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        try:
+            row = order_mail.resend(order, kind, request.user)
+        except order_mail.OrderMailRefused as refusal:
+            return Response({"error": "VALIDATION_ERROR", "message": refusal.client_message}, status=400)
+        is_confirmation = kind == OrderMailKind.CONFIRMATION
+        numbers = order_mail.purchase_numbers(order) if is_confirmation else [order.pretty_id or ""]
+        body = order_mail.mail_response(row, numbers)
+        return Response(body.model_dump(mode="json"), status=status.HTTP_202_ACCEPTED)
 
 
 class AdminOrderAttachmentView(CheckoutChannelMixin, APIView):

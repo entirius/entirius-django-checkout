@@ -2044,6 +2044,7 @@ while the shop still has to fulfil it: a gift card bought for the erased person 
 | `UsedCoupon` | `billing_email`, `shipping_email` | the code and the order (`max_uses_per_user` no longer ties the use to the erased e-mail) |
 | `PaymentIntent` | `provider_request`, `provider_notify` stored before payloads went through the allowlist: everything except ids, amounts, currencies, statuses and timestamps; `redirect_url` (`***REDACTED***`: the gateway's payment page or, for BLIK, a copy of the body's `continue_url`; only the order's creation answer hands it out) | `amount`, `currency`, `external_order_id`, `payment_status`, `code` |
 | `PaymentRedirect` | `target_url` (`***REDACTED***`: a copy of the body's `continue_url`) | token, expiry, consumption time |
+| `OrderMail` | `recipient` (blank) | kind, status, attempts, last error, send time |
 
 Names and free text become `x` of the same length, e-mails `x…x@example.com`. Not touched: invoices
 (`Invoice.invoice_base64`, kept for accounting), order attachments, shipping tracking numbers, `Order.extra`
@@ -2098,3 +2099,51 @@ Orders erased by an earlier release kept the other fields: `manage.py complete-e
 address e-mail is anonymised), `--apply` finishes them, and `--marker-domain <domain>` adds the domain an earlier
 release line anonymised e-mails to, for a database that came from one. The command finishes erasures already made,
 so orders not fulfilled yet do not stop it.
+
+## Order e-mails
+
+With the extra `email` (`entirius-django-email`) installed, every purchase gets one confirmation e-mail and a
+confirmed order that is cancelled gets one cancellation e-mail. Both are sent by the Celery task
+`django_checkout.send_order_mail` (default queue `celery`) and logged in `OrderMail`, one row per order and kind.
+
+| E-mail | Sent when |
+|---|---|
+| Confirmation | at placement when the method that settles the order is not an online gateway (transfer, cash on delivery, cash, deferred payment, free order, or fully covered by a voucher); at the first `confirmed` transition for a gateway (PayU, PayPal, Paynow, Przelewy24, Autopay, Stripe). An abandoned online payment sends nothing |
+| Cancellation | at the transition to `canceled`, only when the purchase's confirmation is `sent` or `pending`; the refund note when the order was paid (status `confirmed`, `holded`, `in_progress` or `complete` before, and not cash on delivery) |
+
+A split purchase gets one confirmation listing every part with its own number, totals summed over the parts; its row
+lives on the lead order (the part that processed the payment). A cancellation names the cancelled part only.
+
+Recipient: `billing_email`, else `shipping_email`; neither → the row is `skipped`. Language: `language_code` of the
+order body when the e-mail module offers it, else the channel's default language. The e-mail channel is the
+`django_email` channel with the checkout channel's idx; a shop without one → `skipped`.
+
+The task locks its row, so one row is sent once. SMTP and socket errors are retried after 60, 180, 420, 900 and
+1800 s; after the last one the row is `failed` and, with `django_notifications` installed, staff get one
+notification ("Order e-mail not sent", role `orders`, subject `checkout.Order:<order uuid>`). Any other error (a
+broken template) fails the row at once, without a retry. `last_error` holds the exception class and a short message,
+never the address or the body.
+
+### Admin API
+
+`GET /api/checkout/v2/admin/{channel}/orders/{uid}/` lists the order's e-mails in `mails`: its own rows plus, for a
+part of a split purchase, the lead's confirmation.
+
+```json
+"mails": [{"kind": "confirmation", "status": "sent", "recipient": "buyer@example.com", "language": "en",
+           "attempts": 1, "last_error": "", "sent_at": "2026-11-12T15:58:01Z", "created": "2026-11-12T15:58:00Z",
+           "order_numbers": ["0200000001", "0200000002"]}]
+```
+
+`POST /api/checkout/v2/admin/{channel}/orders/{uid}/mails/{kind}/resend/` (`kind`: `confirmation` | `canceled`)
+puts the row back to `pending`, records who asked (`requested_by`) and queues a send: 202 with the row. A
+confirmation of a split part resends the lead's. 400 `VALIDATION_ERROR` when the order has no e-mail address, or
+for `canceled` when no cancellation e-mail was ever sent (a resend never creates one); 404 for another kind. Needs
+write on `checkout.orders`; throttled per user, scope `checkout_order_mail_resend` (fallback `30/hour`).
+
+Known limits: the status history is not stored, so a resent cancellation carries the refund note only for an online
+gateway order whose confirmation was sent (a paid transfer order loses it on a resend). A split purchase whose lead
+was cancelled and then paid late keeps the lead `canceled` (`Order.save`) and gets no confirmation; resend it.
+A confirmation still retrying when its order is cancelled is `skipped`; the cancellation e-mail tells the customer.
+A task the broker refuses leaves its row `failed` (`last_error` `…: not enqueued`).
+

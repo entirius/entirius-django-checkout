@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Added
+
+- Order confirmation and cancellation e-mails (extra `email`, `entirius-django-email`; the order e-mail services
+  ship in email 4.4.0, the pin follows once it is on PyPI). One confirmation per purchase, at placement for offline
+  payments and at the first `confirmed` transition for online gateways, one listing every part of a split purchase;
+  one cancellation for a cancelled order whose purchase was confirmed. Sent by the Celery task
+  `django_checkout.send_order_mail` with a retry ladder, logged in the new `OrderMail` model (migration `0085`).
+  Settings `CHECKOUT_ORDER_CONFIRMATION_EMAIL`, `CHECKOUT_ORDER_CANCELED_EMAIL` (both on).
+- Admin API: `mails` in the order detail, `POST …/orders/{uid}/mails/{kind}/resend/` (throttled per user).
+- Erasure blanks the recipient of the order's e-mails.
+
 ### Fixed
 
 - Client-visible: an order whose shipping method delivers to a pickup point (`method_type` `inpost` or

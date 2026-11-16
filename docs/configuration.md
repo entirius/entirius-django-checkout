@@ -14,6 +14,12 @@ services that install django-checkout-voucher), `CUSTOMS_THRESHOLD_ENABLED` (Fal
 `USE_CACHED_VIEWS` (False), `ADD_MAX_AVAILABLE_QUANTITY` (True), `GRATIS_MECHANISM` (1),
 `AUTOPAY_HASH_KEY` (None; `{channel_idx: hash key}`, an Autopay ITN of a channel without a non-empty key is refused), `GLOBAL_STOCK_RESERVATION_CHANNELS` ([]; a single-element list raises).
 
+Order e-mails (extra `email`, [`docs/api/checkout.md`](api/checkout.md#order-e-mails)): `CHECKOUT_ORDER_CONFIRMATION_EMAIL`
+(True) and `CHECKOUT_ORDER_CANCELED_EMAIL` (True) switch each kind off. No beat schedule: every send is triggered by
+the order's creation or status change and runs in the Celery task `django_checkout.send_order_mail` (default queue
+`celery`); a retried send waits in the broker. `DEFAULT_THROTTLE_RATES["checkout_order_mail_resend"]` overrides the
+resend throttle (`30/hour`).
+
 ## Soft integrations (optional extras)
 
 | Extra | Package | Used for |
@@ -21,6 +27,7 @@ services that install django-checkout-voucher), `CUSTOMS_THRESHOLD_ENABLED` (Fal
 | `qms` | entirius-django-qms | stock sync command reads QMS warehouse/xray sources |
 | `vault` | entirius-django-vault | card-on-file storage for PayU card payments |
 | `returns` | entirius-django-returns | returnable-orders lookup in `views/order.py` |
+| `email` | entirius-django-email | order confirmation and cancellation e-mails: `OrderMail` log, send task, admin resend |
 
 Own satellite `django-returns` is imported lazily with graceful fallback; it depends on this
 package (never the other way round), hence an extra — not a runtime dep.
