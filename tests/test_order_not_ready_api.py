@@ -21,7 +21,7 @@ from rest_framework.test import APIRequestFactory
 from django_checkout.api.v2.views.cart_views import CartAddressesView
 from django_checkout.api.v2.views.order_views import OrderCreateView
 from django_checkout.domain.validators.order import CartNotReady, OrderValidation
-from django_checkout.models import Order, ShippingMethod
+from django_checkout.models import Channel, Order, ShippingMethod
 from django_checkout.services import cart_service
 
 factory = APIRequestFactory()
@@ -154,7 +154,19 @@ def test_an_address_method_needs_no_point(empty_cart, channel):
     assert OrderValidation.validate(empty_cart.cart_id, processed_with(shipping)) is True
 
 
-def test_a_method_of_another_channel_is_not_read(empty_cart, locker):
-    """The type comes from the method of the cart's channel: another cart's channel has no `inpost-locker`."""
-    record = SimpleNamespace(code="inpost-locker", delivery_point=None)
-    assert OrderValidation.validate(uuid4(), processed_with(record)) is True
+def test_a_method_of_another_channel_is_not_read(locker):
+    """The type comes from the method of the cart's channel: the cart's channel has no `inpost-locker`, another has."""
+    other = Channel.objects.create(
+        idx="other-channel",
+        label="Other Channel",
+        min_order_price=0,
+        default_language=locker.channel.default_language,
+        default_currency=locker.channel.default_currency,
+        default_country=locker.channel.default_country,
+    )
+    record, _ = cart_service.create_cart(
+        channel=other, items=[], currency_code="EUR", language_code="en", country_code="PL"
+    )
+    shipping = SimpleNamespace(code="inpost-locker", delivery_point=None)
+
+    assert OrderValidation.validate(record.cart_id, processed_with(shipping)) is True

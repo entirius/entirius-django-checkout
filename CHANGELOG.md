@@ -20,6 +20,8 @@
   (v1 answers 403 with the same status), and nothing is ordered. Such an order was created without a point, so
   nobody knew where to send the parcel. A storefront sends the point with `PATCH carts/{id}/shipping/`
   (`delivery_point`); methods of the other types do not change.
+- Removed the dead `Cart.available_delivery_points` property: it used a `DeliveryPoint` model that is no longer
+  imported, so calling it raised `NameError`.
 
 ## 10.1.1 — 2026-11-04
 

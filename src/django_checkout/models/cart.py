@@ -154,21 +154,6 @@ class Cart(models.Model):
         else:
             return None
 
-    @property
-    def available_delivery_points(self):
-        data = self.as_data
-        method_item = self.selected_shipping_method
-        if method_item is not None:
-            country_code = (
-                data.addresses.shipping_address.country_code.lower()
-                if hasattr(data.addresses.shipping_address, "country_code")
-                else data.country_code
-            )
-            # TODO better get_nearest_points
-            return DeliveryPoint.objects.get_nearest_points(method_item.method, country_code)
-        else:
-            return DeliveryPoint.objects.none()
-
     @cached_property
     def shipping_method_for_free_shipping(self):
         """
