@@ -20,8 +20,8 @@ from rest_framework.test import APIRequestFactory
 
 from django_checkout.api.v2.views.cart_views import CartAddressesView
 from django_checkout.api.v2.views.order_views import OrderCreateView
-from django_checkout.domain.validators.order import CartNotReady
-from django_checkout.models import Order
+from django_checkout.domain.validators.order import CartNotReady, OrderValidation
+from django_checkout.models import Channel, Order, ShippingMethod
 from django_checkout.services import cart_service
 
 factory = APIRequestFactory()
@@ -118,3 +118,55 @@ def test_an_unknown_cart_stays_not_found(api_key, channel):
 
 def test_the_v1_view_still_catches_it():
     assert issubclass(CartNotReady, Forbidden)
+
+
+@pytest.fixture
+def locker(channel):
+    return ShippingMethod.objects.create(channel=channel, method_type="inpost", code="inpost-locker")
+
+
+def processed_with(shipping):
+    item = SimpleNamespace(sku="SKU-1", status="valid", total_price=1)
+    return SimpleNamespace(
+        cart=SimpleNamespace(items=[item]), payment_method=object(), shipping_method=shipping, addresses=object()
+    )
+
+
+def test_a_pickup_point_method_without_a_point(api_key, channel, empty_cart, locker):
+    processed = processed_with(SimpleNamespace(code="inpost-locker", delivery_point=None))
+
+    with patch("django_checkout.services.order_service.process_cart", return_value=(processed, [])):
+        response = place_order(api_key, channel, empty_cart.cart_id)
+
+    assert response.status_code == 409
+    assert response.data["error"] == "DELIVERY_POINT_NOT_SELECTED"
+    assert not Order.objects.exists()
+
+
+def test_a_pickup_point_method_with_a_point_passes(empty_cart, locker):
+    shipping = SimpleNamespace(code="inpost-locker", delivery_point={"code": "WAW01A", "name": "Paczkomat WAW01A"})
+    assert OrderValidation.validate(empty_cart.cart_id, processed_with(shipping)) is True
+
+
+def test_an_address_method_needs_no_point(empty_cart, channel):
+    ShippingMethod.objects.create(channel=channel, method_type="default", code="courier")
+    shipping = SimpleNamespace(code="courier", delivery_point=None)
+    assert OrderValidation.validate(empty_cart.cart_id, processed_with(shipping)) is True
+
+
+def test_a_method_of_another_channel_is_not_read(locker):
+    """The type comes from the method of the cart's channel: the cart's channel has no `inpost-locker`, another has."""
+    other = Channel.objects.create(
+        idx="other-channel",
+        label="Other Channel",
+        min_order_price=0,
+        default_language=locker.channel.default_language,
+        default_currency=locker.channel.default_currency,
+        default_country=locker.channel.default_country,
+    )
+    record, _ = cart_service.create_cart(
+        channel=other, items=[], currency_code="EUR", language_code="en", country_code="PL"
+    )
+    shipping = SimpleNamespace(code="inpost-locker", delivery_point=None)
+
+    assert OrderValidation.validate(record.cart_id, processed_with(shipping)) is True

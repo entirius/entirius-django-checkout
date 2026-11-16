@@ -13,6 +13,16 @@
 - Admin API: `mails` in the order detail, `POST …/orders/{uid}/mails/{kind}/resend/` (throttled per user).
 - Erasure blanks the recipient of the order's e-mails.
 
+### Fixed
+
+- Client-visible: an order whose shipping method delivers to a pickup point (`method_type` `inpost` or
+  `pickup_point`) and whose cart names no point is refused: v2 `POST orders/` answers 409 `DELIVERY_POINT_NOT_SELECTED`
+  (v1 answers 403 with the same status), and nothing is ordered. Such an order was created without a point, so
+  nobody knew where to send the parcel. A storefront sends the point with `PATCH carts/{id}/shipping/`
+  (`delivery_point`); methods of the other types do not change.
+- Removed the dead `Cart.available_delivery_points` property: it used a `DeliveryPoint` model that is no longer
+  imported, so calling it raised `NameError`.
+
 ## 10.1.1 — 2026-11-04
 
 ### Security
